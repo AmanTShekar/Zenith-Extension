@@ -1,3 +1,8 @@
+***
+
+### **2. The Professional `LICENSE` File**
+
+```text
 MIT License
 
 Copyright (c) 2026 Aman T Shekar
@@ -19,3 +24,18 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+ADDITIONAL DISCLAIMERS & LIMITATIONS:
+
+1. LIMITATION OF LIABILITY: Under no circumstances shall the author or 
+contributors be held liable for any direct, indirect, incidental, or 
+consequential damages arising from the use of "Surgical Editing" features. 
+This includes unintended source code modifications, build failures, or 
+project-wide state corruption.
+
+2. TECHNICAL WARRANTY: There is no guarantee of compatibility with future 
+versions of React, Vite, or the Chrome browser engine. Users are strictly 
+advised to maintain active Git backups when utilizing Zenith's real-time 
+patching engine.
+--------------------------------------------------------------------------------
