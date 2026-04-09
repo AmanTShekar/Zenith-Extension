@@ -1,0 +1,35 @@
+{
+  "name": "zenith-vite-plugin",
+  "version": "0.1.0",
+  "description": "Zenith Ghost-ID Injector — Vite plugin for surgical visual editing",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:bin": "tsc --outDir dist --rootDir src src/bin/surgical-cli.ts src/surgical.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@babel/generator": "^7.26.0",
+    "@babel/parser": "^7.26.0",
+    "@babel/traverse": "^7.26.0",
+    "@babel/types": "^7.26.0",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/babel__generator": "^7.6.0",
+    "@types/babel__traverse": "^7.20.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT"
+}

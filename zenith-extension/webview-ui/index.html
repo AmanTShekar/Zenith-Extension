@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zenith Designer</title>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web" nonce="${nonce}"></script>
+    <!-- Geist Font Fallback to Inter -->
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+    <style nonce="${nonce}">
+      :root { font-family: 'Inter', sans-serif; }
+      @supports (font-variation-settings: normal) {
+        :root { font-family: 'Inter var', sans-serif; }
+      }
+    </style>
+    <script nonce="${nonce}">
+      window.onerror = function(m, s, l, c, e) {
+        const err = document.createElement('div');
+        err.style.cssText = 'color:red;padding:20px;background:#000;position:fixed;bottom:0;left:0;right:0;z-index:99999;font-family:monospace;border-top:2px solid red;';
+        err.innerText = 'Runtime Error: ' + m + '\nFile: ' + s + '\nLine: ' + l;
+        document.body.appendChild(err);
+      };
+      console.log('Zenith Webview: Script execution started');
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Re-build trigger: version 1.0.1 -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

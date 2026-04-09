@@ -1,0 +1,26 @@
+# Zenith Designer — Official Launch .gitignore
+
+# 🔴 Discarded (Build Garbage)
+node_modules/
+target/
+dist/
+out/
+build/
+.next/
+*.log
+build_error*.txt
+
+# 🔴 Discarded (Legacy/Research)
+*_research/
+*_demo/
+_onlook_audit/
+Screenshot*.png
+SYNC_LAUNCH.bat
+DEPLOY_TO_GITHUB.ps1
+
+# 🟡 User Metadata
+.env
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

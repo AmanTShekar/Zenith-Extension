@@ -1,0 +1,139 @@
+{
+  "name": "zenith-extension",
+  "displayName": "Zenith v3.6 — Global Design OS",
+  "description": "Visual design engine that works on any project, any framework, any workspace.",
+  "version": "3.6.0",
+  "publisher": "zenith",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zenith.visualEdit",
+        "title": "Zenith: Open Visual Canvas",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "zenith.openSeparateWindow",
+        "title": "Zenith: Open in Separate Window",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "zenith.surgicalMode.toggle",
+        "title": "Zenith: Toggle Surgical Mode"
+      },
+      {
+        "command": "zenith.killSidecar",
+        "title": "Zenith: Kill Sidecar"
+      },
+      {
+        "command": "zenith.restartSidecar",
+        "title": "Zenith: Restart Sidecar"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "zenith.visualEdit",
+          "group": "navigation",
+          "when": "resourceExtname == .tsx || resourceExtname == .jsx || resourceExtname == .html || resourceExtname == .css || resourceExtname == .vue || resourceExtname == .svelte || resourceExtname == .js || resourceExtname == .ts"
+        }
+      ],
+      "commandPalette": [
+        { "command": "zenith.killSidecar" },
+        { "command": "zenith.restartSidecar" },
+        { "command": "zenith.surgicalMode.toggle" }
+      ]
+    },
+    "configuration": {
+      "title": "Zenith",
+      "properties": {
+        "zenith.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Zenith sidecar when a workspace opens."
+        },
+        "zenith.devServerPort": {
+          "type": "number",
+          "default": 0,
+          "description": "Dev server port override. 0 = auto-detect (probes common ports)."
+        },
+        "zenith.sidecarPort": {
+          "type": "number",
+          "default": 8082,
+          "description": "Port for the Zenith Sidecar JSON-RPC server."
+        },
+        "zenith.showWelcome": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the welcome panel on first activation."
+        },
+        "zenith.logLevel": {
+          "type": "string",
+          "default": "info",
+          "enum": ["error", "warn", "info", "debug", "trace"],
+          "description": "Sidecar log verbosity (RUST_LOG level)."
+        },
+        "zenith.surgicalMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Surgical Mode (AI-driven design engine)."
+        },
+        "zenith.sandboxPort": {
+          "type": "number",
+          "default": 3005,
+          "description": "Port for the mirrored Zenith Sandbox (Port 3005 recommended)."
+        },
+        "zenith.launchInSeparateWindow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the Zenith Canvas in a separate floating window by default."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zenith-explorer",
+          "title": "Zenith",
+          "icon": "$(symbol-color)"
+        }
+      ]
+    },
+    "views": {
+      "zenith-explorer": [
+        {
+          "id": "zenith.designer",
+          "name": "Visual Designer",
+          "type": "webview",
+          "icon": "$(layout)"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.126",
+    "@types/vscode": "^1.110.0",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^5.59.8",
+    "@typescript-eslint/parser": "^5.59.8",
+    "eslint": "^8.41.0",
+    "typescript": "^5.1.3"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.1.0",
+    "ws": "^8.13.0"
+  }
+}

@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} data:; script-src 'nonce-${nonce}' https://unpkg.com; style-src ${cspSource} 'unsafe-inline' https://unpkg.com https://fonts.googleapis.com; font-src ${cspSource} https://fonts.gstatic.com https://unpkg.com; connect-src ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:*; frame-src http://127.0.0.1:* http://localhost:*;">
+  <title>Zenith Designer Pro</title>
+  <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.0.3/src/regular/style.css">
+  <style nonce="${nonce}">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;600&display=swap');
+
+    :root {
+      --bg: #0b0b0d;
+      --canvas-bg: #000000;
+      --glass: rgba(18, 18, 22, 0.7);
+      --glass-dark: rgba(10, 10, 12, 0.95);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --accent: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.5);
+      --accent-soft: rgba(59, 130, 246, 0.12);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.1);
+      --radius: 12px;
+      --header-h: 56px;
+      --toolbar-h: 44px;
+      --sidebar-w: 260px;
+      --inspector-w: 290px;
+      --success: #10b981;
+      --error: #f43f5e;
+    }
+
+    * { box-sizing: border-box; outline: none; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow: hidden; -webkit-font-smoothing: antialiased; }
+
+    #app-container {
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr var(--inspector-w);
+      grid-template-rows: var(--header-h) 1fr;
+      width: 100%; height: 100vh;
+    }
+
+    .glass-effect {
+      backdrop-filter: blur(28px);
+      -webkit-backdrop-filter: blur(28px);
+      background: var(--glass);
+      border: 1px solid var(--panel-border);
+    }
+
+    header {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; background: var(--glass-dark); border-bottom: 1px solid var(--panel-border);
+      z-index: 1000;
+    }
+
+    .brand { display: flex; align-items: center; gap: 10px; font-family: 'Outfit'; font-weight: 900; font-size: 17px; cursor: pointer; letter-spacing: -0.01em; }
+    .brand i { color: var(--accent); font-size: 22px; filter: drop-shadow(0 0 10px var(--accent-glow)); }
+
+    .omnibox-container {
+      flex: 1; max-width: 600px; height: 34px; background: rgba(0,0,0,0.5); border: 1px solid var(--border);
+      border-radius: 10px; display: flex; align-items: center; padding: 0 14px; margin: 0 24px; transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .omnibox-container:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    #omnibox { background: transparent; border: none; color: var(--text); font-size: 12px; flex: 1; margin-left: 10px; font-family: 'Inter', monospace; }
+
+    .sidebar { background: var(--glass); border-right: 1px solid var(--panel-border); display: flex; flex-direction: column; height: 100%; overflow: hidden; grid-row: 2; grid-column: 1; }
+    #right-sidebar { grid-column: 3; border-right: none; border-left: 1px solid var(--panel-border); }
+
+    .sidebar-header {
+      height: 48px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border);
+    }
+
+    main { 
+      grid-column: 2;
+      grid-row: 2;
+      position: relative; 
+      background: var(--canvas-bg); 
+      background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+      background-size: 24px 24px;
+      display: flex; align-items: center; justify-content: center; 
+      overflow: hidden; 
+      padding: 0; /* Let workspace handle internal spacing */
+      min-width: 0; min-height: 0;
+    }
+
+    #preview-workspace {
+      width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+      position: relative; padding: 40px;
+    }
+
+    #preview-viewport { 
+      position: relative; background: #fff; box-shadow: 0 40px 100px rgba(0,0,0,0.6); 
+      border-radius: var(--radius); overflow: hidden; transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); 
+      transform-origin: center center; display: flex; flex-direction: column;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .viewport-header {
+      height: 32px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0;
+      display: flex; align-items: center; justify-content: space-between; padding: 0 12px;
+      user-select: none;
+    }
+    .viewport-header .title { font-size: 10px; font-weight: 600; color: #64748b; }
+    .viewport-header .controls { display: flex; gap: 6px; }
+    .viewport-header .dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; }
+
+    #previewFrame { border: none; width: 100%; flex: 1; }
+
+    #device-toolbar {
+      position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px; border-radius: 12px; z-index: 900;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+
+    .emulator-btn {
+      background: transparent; color: var(--text-muted); border: none;
+      height: 32px; padding: 0 14px; border-radius: 8px; font-size: 11px; font-weight: 600;
+      display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 0.2s;
+    }
+    .emulator-btn:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .emulator-btn.active { background: white; color: black; box-shadow: 0 4px 12px rgba(255,255,255,0.2); }
+
+    .zoom-control {
+      display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.3); padding: 4px 12px; border-radius: 8px; border: 1px solid var(--border);
+    }
+
+    /* Cards & Components */
+    .server-card {
+      background: rgba(255,255,255,0.03); padding: 14px; border-radius: 12px; border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 14px; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); font-size: 12px; margin-bottom: 8px;
+    }
+    .server-card:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-2px); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+    .status-dot.live { background: var(--success); box-shadow: 0 0 15px var(--success); }
+
+    .btn-primary { background: white; color: black; border: none; padding: 10px 24px; border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; transition: 0.2s; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(255,255,255,0.15); }
+    
+    .tool-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; transition: 0.2s; }
+    .tool-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+    
+    /* ---- Agent Dashboard ---- */
+    .agent-dashboard { display: flex; gap: 8px; margin-left: 12px; }
+    .agent-status { 
+      font-size: 9px; font-weight: 800; padding: 4px 8px; border-radius: 6px; 
+      display: flex; align-items: center; gap: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); color: var(--text-muted);
+    }
+    .agent-status.cyan { color: #00F0FF; }
+    .agent-status.logic { color: #A064FF; }
+    .agent-status.auditor { color: #FEBC2E; }
+    .agent-status.houdini { color: #FF00E5; }
+    .pulse { width: 4px; height: 4px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+    .pulse.active { animation: pulse-anim 2s infinite; }
+    @keyframes pulse-anim { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+
+    .prop-section { padding: 16px; border-bottom: 1px solid var(--border); }
+    .prop-title { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.05em; }
+
+    /* ---- Inspector Tabs ---- */
+    .tabs-header { display: flex; background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--panel-border); }
+    .tab-btn { 
+      flex: 1; padding: 10px; font-size: 10px; font-weight: 700; color: var(--text-muted); 
+      text-transform: uppercase; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; transition: 0.2s;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); background: rgba(255,255,255,0.02); }
+    .tab-content { display: none; height: 100%; overflow-y: auto; }
+    .tab-content.active { display: block; }
+
+    /* ---- Box Model ---- */
+    .box-model-container { padding: 20px; display: flex; justify-content: center; }
+    .box-rect { border: 1px dashed rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; position: relative; font-size: 9px; color: var(--text-muted); }
+    .box-label { position: absolute; top: 2px; left: 4px; font-size: 8px; opacity: 0.5; }
+    .box-margin { width: 220px; height: 160px; background: rgba(246, 178, 107, 0.1); border: 1px solid rgba(246, 178, 107, 0.3); }
+    .box-border { width: 170px; height: 120px; background: rgba(255, 230, 107, 0.1); border: 1px solid rgba(255, 230, 107, 0.3); }
+    .box-padding { width: 130px; height: 90px; background: rgba(147, 196, 125, 0.1); border: 1px solid rgba(147, 196, 125, 0.3); }
+    .box-content { width: 80px; height: 50px; background: rgba(111, 168, 220, 0.1); border: 1px solid rgba(111, 168, 220, 0.3); color: var(--text); font-weight: 700; }
+
+    /* ---- Computed Styles ---- */
+    .computed-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-size: 11px; }
+    .computed-key { color: var(--text-muted); font-family: monospace; }
+    .computed-val { color: var(--text); font-family: monospace; text-align: right; word-break: break-all; max-width: 60%; }
+    .computed-search { width: 100%; background: rgba(0,0,0,0.3); border: none; border-bottom: 1px solid var(--border); padding: 10px 16px; color: white; font-size: 11px; }
+
+    .breadcrumbs { 
+      padding: 10px 16px; display: flex; align-items: center; gap: 6px; 
+      background: rgba(0,0,0,0.2); border-bottom: 1px solid var(--border); overflow-x: auto; 
+      scrollbar-width: none; 
+    }
+    .breadcrumbs::-webkit-scrollbar { display: none; }
+    .breadcrumb-item { 
+      font-size: 10px; font-weight: 600; color: var(--text-muted); cursor: pointer; white-space: nowrap;
+      transition: color 0.1s; display: flex; align-items: center; gap: 4px;
+    }
+    .breadcrumb-item:hover { color: var(--accent); }
+    .breadcrumb-item.active { color: var(--text); }
+    .breadcrumb-sep { font-size: 8px; opacity: 0.3; }
+
+    .input-group { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; margin-bottom: 12px; }
+    .input-group label { font-size: 10px; font-weight: 600; color: var(--text-muted); width: 24px; }
+    .input-group input { background: transparent; border: none; color: white; font-size: 12px; font-family: 'JetBrains Mono', monospace; flex: 1; }
+
+    #launchOverlay {
+      position: fixed; inset: 0; background: radial-gradient(circle at center, #111 0%, #000 100%); z-index: 2000;
+      display: flex; align-items: center; justify-content: center; padding: 24px; transition: 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .launch-card {
+      background: var(--glass-dark); border: 1px solid var(--panel-border); border-radius: 28px; backdrop-filter: blur(60px);
+      padding: 56px; width: 100%; max-width: 800px; box-shadow: 0 100px 200px rgba(0,0,0,0.9);
+    }
+  </style>
+</head>
+<body>
+
+<div id="launchOverlay">
+  <div class="launch-card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="brand" style="font-size:32px;">
+        <i class="ph ph-hexagon"></i>
+        <span>ZENITH</span>
+      </div>
+      <div style="display:flex; gap:12px; align-items:center;">
+        <button class="btn-primary" id="enter-canvas-btn" style="display:none; background:var(--accent); color:white; padding:10px 24px;">Enter Canvas</button>
+        <button class="btn" id="popout-btn-home" style="padding:10px 20px;"><i class="ph ph-arrow-square-out"></i> Pop Out</button>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1.2fr; gap:48px; margin-top:48px;">
+      <div class="dashboard-section">
+        <h3 style="font-size:14px; color:var(--text); margin-bottom:20px;">Live Sidecars</h3>
+        <div id="sidecar-list"><div style="color:var(--text-muted); font-size:12px;">Scanning...</div></div>
+        
+        <div style="margin-top:40px;">
+          <p style="font-size:10px; font-weight:800; color:var(--text-muted); margin-bottom:12px; text-transform:uppercase; letter-spacing:0.04em;">Manual Connection</p>
+          <div style="display:flex; gap:8px;">
+            <input id="manual-url" type="text" placeholder="ws://localhost:8082" style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; flex:1; padding:10px 14px; color:white; font-size:13px;">
+            <button class="btn-primary" id="manual-connect-btn" style="padding:0 20px; font-size:11px;">Connect</button>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dashboard-section">
+        <h3 style="font-size:14px; color:var(--text); margin-bottom:20px;">Detected Projects</h3>
+        <div id="detected-sites-list">
+          <div style="color:var(--text-muted); font-size:12px;">Searching...</div>
+        </div>
+        
+        <div style="margin-top:40px; padding:24px; background:var(--accent-soft); border-radius:16px; border:1px solid var(--accent-soft);">
+          <p style="font-size:11px; color:var(--text-muted); line-height:1.7;">
+            <i class="ph ph-sparkle" style="color:var(--accent); margin-right:6px;"></i>
+            Zenith automatically discovers your local dev servers. Selection transitions you directly to the design workspace.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="app-container">
+  <header>
+    <div class="brand" id="logo-home">
+      <i class="ph ph-hexagon"></i>
+      <span>ZENITH</span>
+    </div>
+    
+    <div class="omnibox-container">
+      <i class="ph ph-globe" style="color:var(--text-muted); font-size:14px;"></i>
+      <input id="omnibox" type="text" placeholder="http://localhost:3000" spellcheck="false">
+      <button class="tool-btn" id="reload-btn" style="font-size:14px;"><i class="ph ph-arrows-clockwise"></i></button>
+    </div>
+
+    <div class="agent-dashboard">
+      <div class="agent-status cyan"><div class="pulse active"></div>CYAN</div>
+      <div class="agent-status logic"><div class="pulse active"></div>LOGIC</div>
+      <div class="agent-status auditor"><div class="pulse"></div>AUDITOR</div>
+      <div class="agent-status houdini"><div class="pulse active"></div>HOUDINI</div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button class="tool-btn" id="undo-btn"><i class="ph ph-arrow-u-up-left"></i></button>
+      <button class="tool-btn" id="redo-btn"><i class="ph ph-arrow-u-up-right"></i></button>
+      <div style="width:1px; height:20px; background:var(--border); margin:0 4px;"></div>
+      <button class="tool-btn" id="popout-btn-header"><i class="ph ph-arrow-square-out"></i></button>
+      <button class="btn-primary" id="commit-btn" style="padding:8px 16px;">Update Layer</button>
+    </div>
+  </header>
+
+  <aside class="sidebar glass-effect">
+    <div class="tabs-header">
+      <button class="tab-btn active" onclick="window.zenith.switchSideTab('layers')">Layers</button>
+      <button class="tab-btn" onclick="window.zenith.switchSideTab('servers')">Servers</button>
+    </div>
+    
+    <div id="side-tab-layers" class="tab-content active">
+      <div class="sidebar-header">
+        <span>Structure</span>
+        <div id="surgical-toggle" class="tool-btn" title="Toggle Surgical Mode"><i class="ph ph-target"></i></div>
+      </div>
+      <div class="scroll-area" id="layers-tree">
+        <div id="empty-layers-hint" style="padding:60px 20px; text-align:center; color:var(--text-muted); font-size:11px; line-height:1.6;">
+          <i class="ph ph-intersect" style="font-size:32px; margin-bottom:16px; display:block; opacity:0.1;"></i>
+          Connect to sidecar<br>to view layers
+        </div>
+      </div>
+    </div>
+
+    <div id="side-tab-servers" class="tab-content">
+      <div class="sidebar-header">
+        <span>Active Hosts</span>
+      </div>
+      <div class="scroll-area" style="padding:16px;">
+        <div id="sidebar-hosts-list">
+          <div style="font-size:11px; color:var(--text-muted); opacity:0.4;">Searching...</div>
+        </div>
+        
+        <div style="margin-top:24px; padding:16px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px;">
+          <p style="font-size:9px; font-weight:800; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase;">Connect Manually</p>
+          <div style="display:flex; gap:6px;">
+            <input id="sidebar-manual-url" type="text" placeholder="ws://..." style="background:rgba(0,0,0,0.3); border:1px solid var(--border); border-radius:6px; flex:1; padding:6px 10px; color:white; font-size:11px;">
+            <button class="btn-primary" onclick="window.zenith.connect(document.getElementById('sidebar-manual-url').value)" style="padding:0 12px; font-size:10px;">Go</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-bottom" style="border-top: 1px solid var(--border); background: rgba(0,0,0,0.1); height: 180px; display: flex; flex-direction: column;">
+      <div class="sidebar-header" style="height: 32px; padding: 0 12px; font-size: 10px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <span style="font-weight:700; opacity:0.6; text-transform:uppercase;">Activity Log</span>
+        <i class="ph ph-trash" style="cursor:pointer; opacity:0.4;" onclick="window.zenith.clearLog()"></i>
+      </div>
+      <div id="activity-log" style="flex:1; padding:10px; font-family:monospace; font-size:10px; overflow-y:auto; color:var(--text-muted); line-height:1.5;">
+        <div style="opacity:0.3;">> Engine v3.11 ready</div>
+      </div>
+    </div>
+    
+    <div class="sidebar-footer" style="padding:12px 16px; border-top:1px solid var(--border); background:rgba(0,0,0,0.2); font-size:10px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+      <i class="ph ph-info"></i>
+      <span>Zenith v3.11 Engine</span>
+    </div>
+  </aside>
+
+  <main id="canvas-main">
+    <div id="device-toolbar" class="glass-effect">
+      <div style="display:flex; gap:4px;">
+        <button class="emulator-btn active" data-emu="desktop"><i class="ph ph-desktop"></i> Desktop</button>
+        <button class="emulator-btn" data-emu="tablet"><i class="ph ph-tablet"></i> Tablet</button>
+        <button class="emulator-btn" data-emu="mobile"><i class="ph ph-phone"></i> Mobile</button>
+      </div>
+      <div style="width:1px; height:20px; background:var(--border); margin:0 8px;"></div>
+      <div class="zoom-control">
+        <button class="tool-btn" style="width:24px; height:24px; font-size:12px;" onclick="window.zenith.adjustZoom(-0.1)"><i class="ph ph-minus"></i></button>
+        <input type="range" id="zoom-slider" min="0.2" max="2.0" step="0.01" value="1" style="width:60px;">
+        <button class="tool-btn" style="width:24px; height:24px; font-size:12px;" onclick="window.zenith.adjustZoom(0.1)"><i class="ph ph-plus"></i></button>
+        <div style="width:1px; height:12px; background:var(--border); margin:0 4px;"></div>
+        <button class="tool-btn" id="fit-btn" style="width:24px; height:24px; font-size:12px;" title="Fit to Screen"><i class="ph ph-corners-in"></i></button>
+        <span id="zoom-label" style="font-size:10px; color:var(--text-muted); width:32px; font-weight:600; margin-left:4px;">100%</span>
+        <span id="viewport-dims" style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-left:8px;">1280 × 800</span>
+      </div>
+    </div>
+
+    <div id="preview-workspace">
+      <div id="preview-viewport">
+        <div class="viewport-header">
+          <div class="controls">
+            <div class="dot" style="background:#ff5f57;"></div>
+            <div class="dot" style="background:#febc2e;"></div>
+            <div class="dot" style="background:#28c840;"></div>
+          </div>
+          <div class="title" id="viewport-title">http://localhost:3000</div>
+          <div style="width:40px;"></div>
+        </div>
+        <iframe id="previewFrame" src="about:blank"></iframe>
+      </div>
+    </div>
+    
+    <div id="status-bar" class="glass-effect" style="position:absolute; bottom:20px; right:20px; padding:8px 16px; border-radius:12px; display:flex; align-items:center; gap:12px; z-index:1000;">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text" style="font-size:11px; font-weight:600;">Disconnected</span>
+      <span style="opacity:0.2">|</span>
+      <span id="latency-display" style="font-size:11px; font-family:monospace; color:var(--text-muted);">-ms</span>
+    </div>
+  </main>
+
+  <aside class="sidebar glass-effect" id="right-sidebar">
+    <div class="tabs-header">
+      <button class="tab-btn active" id="btn-tab-styles" onclick="window.zenith.switchTab('styles')">Styles</button>
+      <button class="tab-btn" id="btn-tab-computed" onclick="window.zenith.switchTab('computed')">Computed</button>
+      <button class="tab-btn" id="btn-tab-layout" onclick="window.zenith.switchTab('layout')">Layout</button>
+    </div>
+
+    <div id="tab-styles" class="tab-content active">
+      <div class="scroll-area" id="inspector-ui">
+        <div style="padding:100px 20px; text-align:center; color:var(--text-muted); font-size:12px; line-height:1.6;">
+          <i class="ph ph-cursor-click" style="font-size:40px; display:block; margin-bottom:20px; opacity:0.1;"></i>
+          Select an element<br>to edit properties
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-computed" class="tab-content">
+      <input type="text" class="computed-search" id="comp-search" placeholder="Filter properties..." oninput="window.zenith.filterComputed(this.value)">
+      <div class="scroll-area" id="computed-list" style="padding:16px;">
+        <div style="text-align:center; color:var(--text-muted); font-size:11px; margin-top:40px;">No element selected</div>
+      </div>
+    </div>
+
+    <div id="tab-layout" class="tab-content">
+      <div class="box-model-container" id="box-model-ui">
+         <div style="text-align:center; color:var(--text-muted); font-size:11px; margin-top:40px;">No element selected</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script nonce="${nonce}">
+  (function() {
+    const vscode = acquireVsCodeApi();
+
+    class ZenithController {
+      constructor() {
+        this.state = {
+          connected: false,
+          surgical: false,
+          zoom: 1,
+          project: null,
+          selectedId: null,
+          emuMode: 'desktop'
+        };
+        this.probedPorts = new Set();
+        this.cacheElements();
+        this.bindEvents();
+        this.listenMessages();
+        this.startProbing();
+      }
+
+      cacheElements() {
+        this.overlay = document.getElementById('launchOverlay');
+        this.preview = document.getElementById('previewFrame');
+        this.viewport = document.getElementById('preview-viewport');
+        this.omnibox = document.getElementById('omnibox');
+        this.statusDot = document.getElementById('status-dot');
+        this.statusText = document.getElementById('status-text');
+        this.latency = document.getElementById('latency-display');
+        this.zoomSlider = document.getElementById('zoom-slider');
+        this.zoomLabel = document.getElementById('zoom-label');
+        this.surgicalBtn = document.getElementById('surgical-toggle');
+        this.viewportDims = document.getElementById('viewport-dims');
+      }
+
+      bindEvents() {
+        document.getElementById('enter-canvas-btn').onclick = () => this.toggleDashboard(false);
+        document.getElementById('logo-home').onclick = () => this.toggleDashboard(true);
+        
+        document.getElementById('manual-connect-btn').onclick = () => {
+          const url = document.getElementById('manual-url').value;
+          if(url) {
+            this.connect(url);
+            this.toggleDashboard(false);
+          }
+        };
+
+        const emuBtns = document.querySelectorAll('.emulator-btn');
+        emuBtns.forEach(btn => {
+          btn.onclick = () => {
+            emuBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            this.setEmulator(btn.dataset.emu);
+          };
+        });
+
+        document.getElementById('popout-btn-home').onclick = () => vscode.postMessage({ command: 'popOut' });
+        document.getElementById('popout-btn-header').onclick = () => vscode.postMessage({ command: 'popOut' });
+        document.getElementById('reload-btn').onclick = () => this.navigate(this.omnibox.value);
+        document.getElementById('commit-btn').onclick = () => {
+          if (this.state.selectedId) vscode.postMessage({ command: 'commit', zenithId: this.state.selectedId });
+        };
+        
+        this.omnibox.onkeydown = (e) => { if(e.key === 'Enter') this.navigate(this.omnibox.value); };
+        this.zoomSlider.oninput = () => this.setZoom(this.zoomSlider.value);
+        document.getElementById('fit-btn').onclick = () => this.fitToScreen();
+        this.surgicalBtn.onclick = () => vscode.postMessage({ command: 'toggleSurgical' });
+        document.getElementById('undo-btn').onclick = () => vscode.postMessage({ command: 'undo' });
+        document.getElementById('redo-btn').onclick = () => vscode.postMessage({ command: 'redo' });
+
+        window.onkeydown = (e) => {
+          if (e.altKey && e.key === 'r') this.navigate(this.omnibox.value);
+          if (e.ctrlKey && e.key === 'z') vscode.postMessage({ command: 'undo' });
+          if (e.ctrlKey && e.key === 'y') vscode.postMessage({ command: 'redo' });
+        };
+      }
+
+      listenMessages() {
+        window.addEventListener('message', e => {
+          const m = e.data;
+          switch(m.type) {
+            case 'projectInfo': 
+              this.updateProject(m); 
+              this.log(`Project: ${m.name || 'Untitled'}`);
+              break;
+            case 'status': 
+              this.updateStatus(m.connected, m.latency); 
+              if(m.connected) this.log('Sidecar connected', 'info');
+              break;
+            case 'zenithSelect': 
+              this.onSelect(
+                { id: m.zenithId, tagName: m.element || 'div' }, 
+                { width: m.rect.w, height: m.rect.h, left: m.rect.x, top: m.rect.y },
+                m.zenithStack || [],
+                m.computedStyles || {}
+              ); 
+              break;
+            case 'surgicalModeSet': 
+              this.applySurgical(m.enabled); 
+              this.log(`Surgical mode ${m.enabled?'ON':'OFF'}`, m.enabled?'warn':'info');
+              break;
+            case 'sidecarState':
+              if (m.state === 'ready') this.connect(`ws://127.0.0.1:${m.port}`);
+              break;
+            case 'zenithForwardToFrame':
+              if (this.preview && this.preview.contentWindow) {
+                let targetOrigin = '*';
+                try { targetOrigin = new URL(this.preview.src).origin; } catch (_) {}
+                this.preview.contentWindow.postMessage(m.payload, targetOrigin);
+              }
+              break;
+          }
+        });
+        vscode.postMessage({ type: 'ready' });
+      }
+
+      setEmulator(mode) {
+        this.state.emuMode = mode;
+        const v = this.viewport;
+        v.style.transition = 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+        
+        if (mode === 'mobile') {
+          v.style.width = '375px';
+          v.style.height = '667px';
+        } else if (mode === 'tablet') {
+          v.style.width = '768px';
+          v.style.height = '1024px';
+        } else {
+          v.style.width = '1280px';
+          v.style.height = '800px';
+        }
+        
+        this.log(`Switched to ${mode} view`);
+        this.updateViewportLabel();
+        setTimeout(() => this.fitToScreen(), 500); // Auto-fit after resize
+      }
+
+      updateViewportLabel() {
+        const rect = this.viewport.getBoundingClientRect();
+        this.viewportDims.textContent = `${Math.round(rect.width / this.state.zoom)} × ${Math.round(rect.height / this.state.zoom)}`;
+      }
+
+      connect(url) {
+        vscode.postMessage({ command: 'connect', url });
+      }
+
+      navigate(url) {
+        if(!url) return;
+        const target = url.startsWith('http') ? url : `http://${url}`;
+        this.preview.src = target;
+        this.omnibox.value = url;
+        document.getElementById('viewport-title').textContent = url;
+      }
+
+      toggleDashboard(show) {
+        this.overlay.style.opacity = show ? '1' : '0';
+        setTimeout(() => this.overlay.style.display = show ? 'flex' : 'none', 400);
+      }
+
+      updateStatus(connected, ms) {
+        this.state.connected = connected;
+        this.statusDot.className = connected ? 'status-dot live' : 'status-dot';
+        this.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        this.latency.textContent = connected ? `${ms}ms` : '-ms';
+        document.getElementById('enter-canvas-btn').style.display = connected ? 'inline-block' : 'none';
+      }
+
+      updateProject(data) {
+        this.state.project = data;
+        
+        const updateLists = (id) => {
+          const list = document.getElementById(id);
+          if (!list || !data.detectedSites) return;
+          list.innerHTML = '';
+          data.detectedSites.forEach(url => {
+            const card = document.createElement('div');
+            card.className = 'server-card';
+            const isLocal = url.includes('localhost');
+            card.innerHTML = `<div class="status-dot live"></div><span style="flex:1; font-weight:${isLocal?700:400}">${url}</span><i class="ph ph-arrow-right" style="font-size:10px; opacity:0.3;"></i>`;
+            card.onclick = () => {
+              this.navigate(url);
+              this.toggleDashboard(false);
+            };
+            list.appendChild(card);
+          });
+        };
+
+        updateLists('detected-sites-list');
+        updateLists('sidebar-hosts-list');
+
+        if (data.devServerUrl && (!this.omnibox.value || this.omnibox.value === 'about:blank')) {
+          this.navigate(data.devServerUrl);
+        }
+      }
+
+      setZoom(val) {
+        this.state.zoom = Math.max(0.1, Math.min(2.0, parseFloat(val)));
+        this.zoomLabel.textContent = `${Math.round(this.state.zoom * 100)}%`;
+        this.zoomSlider.value = this.state.zoom;
+        this.viewport.style.transform = `scale(${this.state.zoom})`;
+        this.updateViewportLabel();
+      }
+
+      adjustZoom(delta) {
+        this.setZoom(this.state.zoom + delta);
+      }
+
+      log(msg, type = 'info') {
+        const logEl = document.getElementById('activity-log');
+        if (!logEl) return;
+        const entry = document.createElement('div');
+        entry.style.marginBottom = '2px';
+        const now = new Date();
+        const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+        entry.innerHTML = `<span style="opacity:0.3">[${ts}]</span> <span style="color:${type==='err'?'#FF5F57':type==='warn'?'#FEBC2E':'var(--text-muted)'}">> ${msg}</span>`;
+        logEl.appendChild(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      clearLog() {
+        document.getElementById('activity-log').innerHTML = '<div style="opacity:0.3;">> Log cleared</div>';
+      }
+
+      fitToScreen() {
+        const workspace = document.getElementById('preview-workspace');
+        const workRect = workspace.getBoundingClientRect();
+        const vWidth = parseInt(this.viewport.style.width) || 1280;
+        const vHeight = (parseInt(this.viewport.style.height) || 800) + 32; // + header
+        
+        const padding = 80;
+        const scaleX = (workRect.width - padding) / vWidth;
+        const scaleY = (workRect.height - padding) / vHeight;
+        const scale = Math.min(scaleX, scaleY, 1);
+        
+        this.setZoom(scale);
+      }
+
+      applySurgical(enabled) {
+        this.state.surgical = enabled;
+        this.surgicalBtn.style.color = enabled ? 'var(--accent)' : 'var(--text-muted)';
+      }
+      switchTab(tabId) {
+        document.querySelectorAll('#right-sidebar .tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('#right-sidebar .tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`tab-${tabId}`).classList.add('active');
+        document.getElementById(`btn-tab-${tabId}`).classList.add('active');
+      }
+
+      switchSideTab(tabId) {
+        document.querySelectorAll('.sidebar:not(#right-sidebar) .tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.sidebar:not(#right-sidebar) .tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`side-tab-${tabId}`).classList.add('active');
+        // Find existing buttons in header - simpler to just look for text or use data-tab
+        const btns = document.querySelectorAll('.sidebar .tabs-header .tab-btn');
+        btns.forEach(b => {
+           if(b.textContent.toLowerCase().includes(tabId)) b.classList.add('active');
+           else b.classList.remove('active');
+        });
+      }
+
+      onSelect(node, rect, stack, computed = {}) {
+        this.state.selectedId = node.id;
+        this.state.currentStack = stack;
+        this.state.computedStyles = computed;
+
+        this.log(`Selected ${node.tagName} (${node.id.substring(0,8)}...)`);
+        this.renderStyles(node, rect, stack);
+        this.renderComputed(computed);
+        this.renderLayout(computed, rect);
+        
+        // Auto-switch to Styles tab on fresh select if not on a data tab
+        const activeTab = document.querySelector('#right-sidebar .tab-btn.active');
+        if (!activeTab || activeTab.id === 'btn-tab-layers') {
+           this.switchTab('styles');
+        }
+      }
+
+      renderStyles(node, rect, stack) {
+        const content = document.getElementById('inspector-ui');
+        let breadcrumbsHtml = '';
+        if (stack && stack.length > 0) {
+          breadcrumbsHtml = '<div class="breadcrumbs">';
+          stack.slice().reverse().forEach((entry, i) => {
+            const isLast = i === stack.length - 1;
+            const icon = entry.isComponent ? 'ph-cube' : 'ph-tag';
+            breadcrumbsHtml += `
+              <div class="breadcrumb-item ${isLast ? 'active' : ''}" onclick="window.zenith.selectFromStack(${stack.length - 1 - i})">
+                <i class="ph ${icon}"></i>
+                ${entry.name}
+              </div>
+            `;
+            if (!isLast) breadcrumbsHtml += '<i class="ph ph-caret-right breadcrumb-sep"></i>';
+          });
+          breadcrumbsHtml += '</div>';
+        }
+
+        content.innerHTML = `
+          ${breadcrumbsHtml}
+          <div class="prop-section">
+            <div class="prop-title">Selected Element</div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="font-size:13px; font-weight:800; color:var(--accent);">&lt;${node.tagName.toLowerCase()}&gt;</div>
+              <div style="font-size:8px; font-weight:700; background:var(--accent-soft); color:var(--accent); padding:2px 6px; border-radius:4px;">GHOST</div>
+            </div>
+            <div style="font-family:monospace; font-size:9px; color:var(--text-muted); margin-top:8px; word-break:break-all; opacity:0.6;">${node.id}</div>
+          </div>
+          <div class="prop-section">
+            <div class="prop-title">Hardening Sliders</div>
+            <div style="margin-bottom:16px;">
+              <label style="font-size:10px; color:var(--text-muted); display:block; margin-bottom:6px;">Opacity</label>
+              <input type="range" min="0" max="1" step="0.01" value="${computed.opacity || 1}" oninput="window.zenith.stageProp('${node.id}', 'opacity', this.value)" style="width:100%;">
+            </div>
+            <div>
+              <label style="font-size:10px; color:var(--text-muted); display:block; margin-bottom:6px;">Border Radius</label>
+              <input type="range" min="0" max="40" step="1" value="${parseInt(computed.borderRadius) || 0}" oninput="window.zenith.stageProp('${node.id}', 'borderRadius', this.value + 'px')" style="width:100%;">
+            </div>
+          </div>
+        `;
+      }
+
+      renderComputed(computed) {
+        const list = document.getElementById('computed-list');
+        const search = document.getElementById('comp-search').value.toLowerCase();
+        
+        let html = '';
+        const keys = Object.keys(computed).sort();
+        keys.forEach(key => {
+          if (search && !key.toLowerCase().includes(search)) return;
+          html += `
+            <div class="computed-row">
+              <span class="computed-key">${key}</span>
+              <span class="computed-val">${computed[key]}</span>
+            </div>
+          `;
+        });
+        list.innerHTML = html || '<div style="text-align:center; padding:20px; color:var(--text-muted);">No matching properties</div>';
+      }
+
+      filterComputed(val) {
+        if (this.state.computedStyles) this.renderComputed(this.state.computedStyles);
+      }
+
+      renderLayout(computed, rect) {
+        const container = document.getElementById('box-model-ui');
+        
+        const getVal = (prop) => {
+          const val = computed[prop];
+          return (val && val !== '0px') ? parseInt(val) : '-';
+        };
+
+        const m = { t: getVal('marginTop'), r: getVal('marginRight'), b: getVal('marginBottom'), l: getVal('marginLeft') };
+        const p = { t: getVal('paddingTop'), r: getVal('paddingRight'), b: getVal('paddingBottom'), l: getVal('paddingLeft') };
+        const b = { t: getVal('borderTopWidth'), r: getVal('borderRightWidth'), b: getVal('borderBottomWidth'), l: getVal('borderLeftWidth') };
+
+        container.innerHTML = `
+          <div class="box-rect box-margin">
+            <span class="box-label">margin</span>
+            <div style="position:absolute; top:2px;">${m.t}</div>
+            <div style="position:absolute; right:4px;">${m.r}</div>
+            <div style="position:absolute; bottom:2px;">${m.b}</div>
+            <div style="position:absolute; left:4px;">${m.l}</div>
+            
+            <div class="box-rect box-border">
+              <span class="box-label">border</span>
+              <div style="position:absolute; top:2px;">${b.t}</div>
+              <div style="position:absolute; right:4px;">${b.r}</div>
+              <div style="position:absolute; bottom:2px;">${b.b}</div>
+              <div style="position:absolute; left:4px;">${b.l}</div>
+
+              <div class="box-rect box-padding">
+                <span class="box-label">padding</span>
+                <div style="position:absolute; top:2px;">${p.t}</div>
+                <div style="position:absolute; right:4px;">${p.r}</div>
+                <div style="position:absolute; bottom:2px;">${p.b}</div>
+                <div style="position:absolute; left:4px;">${p.l}</div>
+
+                <div class="box-rect box-content">
+                  ${Math.round(rect.width)} × ${Math.round(rect.height)}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      selectFromStack(index) {
+        const entry = this.state.currentStack[index];
+        if (!entry) return;
+        
+        // Re-trigger select with the component's ghost ID
+        const ghostId = `${entry.file}:${entry.line}:${entry.col}`;
+        this.onSelect(
+          { id: ghostId, tagName: entry.name },
+          { width: 0, height: 0, left: 0, top: 0 }, // We don't have rect for the component itself usually
+          this.state.currentStack
+        );
+
+        // Tell the bridge to highlight this new element (optional but nice)
+        // For now, at least update the state so 'Commit' works on the component
+      }
+
+      stageProp(id, property, value) {
+        vscode.postMessage({ command: 'stage', intent: { element: id, property, value } });
+      }
+
+      startProbing() {
+        const ports = [8082, 8083];
+        const probe = () => {
+          ports.forEach(port => {
+            if (this.probedPorts.has(port)) return;
+            const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+            ws.onopen = () => {
+              ws.send(JSON.stringify({ jsonrpc: "2.0", id: "probe", method: "sidecar/status", params: [] }));
+            };
+            ws.onmessage = (msg) => {
+              const data = JSON.parse(msg.data);
+              if (data.id === "probe") {
+                this.probedPorts.add(port);
+                this.addSidecarToList(port);
+                ws.close();
+              }
+            };
+            ws.onerror = () => ws.close();
+          });
+        };
+        probe();
+        setInterval(probe, 8000);
+      }
+
+      addSidecarToList(port) {
+        const list = document.getElementById('sidecar-list');
+        if (list.innerHTML.includes('Scanning')) list.innerHTML = '';
+        const card = document.createElement('div');
+        card.className = 'server-card';
+        card.innerHTML = `<div class="dot live"></div><span style="flex:1;">Zenith Sidecar :${port}</span><i class="ph ph-arrow-right" style="font-size:10px; opacity:0.3;"></i>`;
+        card.onclick = () => {
+          this.connect(`ws://127.0.0.1:${port}`);
+          this.toggleDashboard(false);
+        };
+        list.appendChild(card);
+      }
+    }
+
+    window.zenith = new ZenithController();
+  })();
+</script>
+</body>
+</html>
+
