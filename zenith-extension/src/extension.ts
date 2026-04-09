@@ -61,7 +61,7 @@ let statusBar: vscode.StatusBarItem;
 // ---------------------------------------------------------------------------
 // Common dev server ports to probe (order = likelihood)
 // ---------------------------------------------------------------------------
-const COMMON_DEV_PORTS = [3000, 3001, 3002, 5173, 5174, 4173, 8080, 8000, 4000, 4321, 5500, 5501];
+const COMMON_DEV_PORTS = [3000, 3001, 3002, 5173, 5174, 4173, 8000, 4000, 4321, 5500, 5501];
 
 // ---------------------------------------------------------------------------
 // Activate
@@ -395,6 +395,13 @@ async function getAvailablePort(start: number): Promise<number> {
 const ongoingStartups = new Map<number, Promise<void>>();
 
 async function ensureSidecarForWorkspace(workspaceRoot: string): Promise<void> {
+    // v3.12 Project Filtering: Ignore Zenith's own source code to avoid connection hijacking
+    const lowerRoot = workspaceRoot.toLowerCase();
+    if (lowerRoot.includes('zenith-extension') || lowerRoot.includes('zenith-vite-plugin')) {
+        console.log(`[Zenith] Skipping sidecar for source-project: ${workspaceRoot}`);
+        return;
+    }
+
     const configBasePort = zenithConfig().sidecarPort;
 
     // Check if already ready
@@ -411,14 +418,7 @@ async function ensureSidecarForWorkspace(workspaceRoot: string): Promise<void> {
 
     const startup = (async () => {
         // Detect target port for the Sandbox Proxy (v11.0 Hardening)
-        const sites = await detectDevServers();
-        const firstSite = sites[0]; // e.g. "http://localhost:3001"
-        let targetPort = 5173; // Fallback
-        
-        if (firstSite) {
-            const match = firstSite.match(/:(\d+)/);
-            if (match) targetPort = parseInt(match[1], 10);
-        }
+        const targetPort = await resolveProjectPort(workspaceRoot) ?? 5173;
 
         const [framework, globalIndexPath] = await Promise.all([
             detectFrameworkTS(workspaceRoot),
@@ -589,6 +589,43 @@ export async function detectDevServers(): Promise<string[]> {
     // [O4] Store result in cache
     _devServerCache = { result: sorted, ts: Date.now() };
     return sorted;
+}
+
+
+async function resolveProjectPort(workspaceRoot: string): Promise<number | null> {
+    // Priority 1: User-set override in VS Code settings
+    const configSetting = vscode.workspace.getConfiguration('zenith').get<number>('devServerPort', 0);
+    if (configSetting > 0) return configSetting;
+
+    // Priority 2: Explicit Zenith config file
+    const zenithConfigPath = path.join(workspaceRoot, 'zenith.config.ts');
+    if (fs.existsSync(zenithConfigPath)) {
+        try {
+            const raw = fs.readFileSync(zenithConfigPath, 'utf8');
+            const match = raw.match(/devServerUrl:\s*['"]http:\/\/127.0.0.1:(\d+)['"]/);
+            if (match) return parseInt(match[1], 10);
+        } catch {}
+    }
+
+    // Priority 3: Vite config (most common in monorepos)
+    const viteConfigPath = path.join(workspaceRoot, 'vite.config.ts');
+    if (fs.existsSync(viteConfigPath)) {
+        try {
+            const raw = fs.readFileSync(viteConfigPath, 'utf8');
+            // Support both "port: 3001" and "port = 3001"
+            const match = raw.match(/port:\s*(\d+)/i) || raw.match(/port\s*=\s*(\d+)/i);
+            if (match) return parseInt(match[1], 10);
+        } catch {}
+    }
+
+    // Priority 4: Dynamic detection via probe (v3.11 logic)
+    const sites = await detectDevServers();
+    if (sites.length > 0) {
+        const match = sites[0].match(/:(\d+)/);
+        if (match) return parseInt(match[1], 10);
+    }
+
+    return null;
 }
 
 
@@ -806,6 +843,18 @@ async function getGlobalIndexPath(workspaceRoot: string): Promise<string> {
 
 function getWorkspaceRootForFile(filePath: string): string | undefined {
     if (!filePath) return undefined;
+    
+    // v3.11 Monorepo Hardening: Search for the closest project root (package.json)
+    // This ensures hash synchronization with the Vite plugin in subfolders.
+    let current = path.dirname(filePath);
+    while (current !== path.dirname(current)) {
+        if (fs.existsSync(path.join(current, 'package.json'))) {
+            return current;
+        }
+        current = path.dirname(current);
+    }
+    
+    // Fallback to standard VS Code logic
     const uri = vscode.Uri.file(filePath);
     return vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
 }
@@ -1524,12 +1573,8 @@ class ZenithViewProvider implements vscode.WebviewViewProvider {
     constructor(private readonly _context: vscode.ExtensionContext) { }
 
     private async _handleMessage(message: any, webview: vscode.Webview) {
-        // Debug alert to confirm webview is sending messages
-        vscode.window.showInformationMessage(`Webview message: ${message.type}`);
-
-        const root = this._lastRoot || await resolveTargetWorkspace();
+        const root = await resolveTargetWorkspace();
         if (!root) return;
-        this._lastRoot = root;
         const handle = activeSidecars.get(root);
         handleWebviewMessage(handle, message, webview, root, this._context);
     }
@@ -1556,9 +1601,8 @@ class ZenithViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtml(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            const root = this._lastRoot || await resolveTargetWorkspace();
+            const root = await resolveTargetWorkspace();
             if (!root) return;
-            this._lastRoot = root;
             const handle = activeSidecars.get(root);
             handleWebviewMessage(handle, message, webviewView.webview, root, this._context);
         });

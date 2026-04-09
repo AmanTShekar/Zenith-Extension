@@ -7,8 +7,8 @@ use std::net::SocketAddr;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
+use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
-use hyper_util::server::conn::auto::Builder;
 use tokio::net::TcpListener;
 use http_body_util::{BodyExt, Full};
 use bytes::Bytes;
@@ -53,13 +53,14 @@ impl SandboxProxy {
             let client = client.clone();
             
             tokio::task::spawn(async move {
-                // [O4] Audit Fix: MUST allow_http1_upgrades for HMR WebSocket tunneling
-                if let Err(err) = Builder::new(hyper_util::rt::TokioExecutor::new())
+                // v16.0 Surgical Rectification: In Hyper 1.0, with_upgrades() is called 
+                // on the connection object, NOT the builder.
+                let conn = http1::Builder::new()
                     .serve_connection(io, service_fn(move |req| {
                         handle_proxy(req, target_port, client.clone())
-                    }))
-                    .await
-                {
+                    }));
+                
+                if let Err(err) = conn.with_upgrades().await {
                     tracing::debug!("[Zenith Proxy] Connection closed: {}", err);
                 }
             });
@@ -360,7 +361,8 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
 
 async fn handle_ws_upgrade(mut req: Request<Incoming>, target_port: u16) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let target_addr = format!("127.0.0.1:{}", target_port);
-    let mut resp = Response::builder();
+    let mut resp = Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS);
     
     // Copy necessary headers for WS handshake
     for (key, value) in req.headers() {
@@ -372,16 +374,19 @@ async fn handle_ws_upgrade(mut req: Request<Incoming>, target_port: u16) -> Resu
     tokio::task::spawn(async move {
         match hyper::upgrade::on(&mut req).await {
             Ok(upgraded) => {
-                if let Ok(mut target_socket) = tokio::net::TcpStream::connect(target_addr).await {
-                    let mut upgraded = TokioIo::new(upgraded);
-                    let _ = tokio::io::copy_bidirectional(&mut upgraded, &mut target_socket).await;
+                match tokio::net::TcpStream::connect(target_addr).await {
+                    Ok(mut target_socket) => {
+                        let mut upgraded = TokioIo::new(upgraded);
+                        if let Err(e) = tokio::io::copy_bidirectional(&mut upgraded, &mut target_socket).await {
+                            error!("[Zenith Proxy] WS Tunnel Error: {}", e);
+                        }
+                    }
+                    Err(e) => error!("[Zenith Proxy] Failed to connect to target WS: {}", e),
                 }
             }
             Err(e) => error!("[Zenith Proxy] WS Upgrade failed: {}", e),
         }
     });
 
-    Ok(resp.status(StatusCode::SWITCHING_PROTOCOLS)
-        .body(Full::new(Bytes::new()))
-        .unwrap())
+    Ok(resp.body(Full::new(Bytes::new())).unwrap())
 }
