@@ -203,10 +203,16 @@ export async function activate(context: vscode.ExtensionContext) {
             if (!handle) return;
             try {
                 const result = await handle.rpc.call('zenith.engine.toggle_surgical', []);
-                vscode.workspace.getConfiguration('zenith').update(
+                await vscode.workspace.getConfiguration('zenith').update(
                     'surgicalMode', result, vscode.ConfigurationTarget.Global
                 );
-                vscode.window.showInformationMessage(`Zenith Surgical Mode: ${result ? 'ON' : 'OFF'}`);
+                
+                // Enhanced Notification with Mechanical Parity
+                vscode.window.showInformationMessage(
+                    `Zenith Surgical Mode: ${result ? 'ENABLED ✓' : 'DISABLED ✗'}`,
+                    ...(result ? ['Audit System'] : [])
+                );
+
                 broadcastToWebviews({ type: 'surgicalModeSet', enabled: result });
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Surgical toggle failed: ${err.message}`);
@@ -234,6 +240,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 
                 let result;
                 try {
+                    console.log(`[ZENITH-RPC] EXEC zenith.engine.stage tx=${txId} intent=${rpcIntent.type}`);
                     result = await handle.rpc.call('zenith.engine.stage', [
                         txId,
                         rpcIntent
@@ -276,6 +283,7 @@ export async function activate(context: vscode.ExtensionContext) {
             try {
                 const targetId = zenithId || '';
                 const method = targetId === '' ? 'vfs.commit' : 'zenith.engine.commit';
+                console.log(`[ZENITH-RPC] EXEC ${method} target=${targetId || 'ALL'}`);
                 const result = await handle.rpc.call(method, targetId === '' ? [] : [targetId]);
                 
                 if (targetId === '') {
@@ -1358,6 +1366,18 @@ async function handleWebviewMessage(
             vscode.commands.executeCommand('zenith.surgicalMode.toggle');
             return;
 
+        case 'hardenWal':
+            try {
+                if (!handle) throw new Error('Not connected to sidecar');
+                await handle.rpc.call('vfs.harden_wal', []);
+                webview.postMessage({ type: 'hardenWalResult', success: true });
+                webview.postMessage({ type: 'log', text: 'WAL Hardened: Log truncated successfully', level: 'success' });
+            } catch (e: any) {
+                webview.postMessage({ type: 'hardenWalResult', success: false, error: e.message });
+                webview.postMessage({ type: 'log', text: `WAL Hardening failed: ${e.message}`, level: 'error' });
+            }
+            return;
+
         case 'detectDevServer':
             resolveDevServerUrl(root).then((url) => {
                 if (url) {
@@ -1381,19 +1401,23 @@ async function handleWebviewMessage(
         case 'zenithTextEdit':
             try {
                 if (!handle) throw new Error('Not connected to sidecar');
+                console.log(`[ZENITH-EXT] Processing zenithTextEdit: ${message.zenithId} -> "${message.newText}"`);
+                webview.postMessage({ type: 'log', text: `[EXT] Patching text for ${message.zenithId}...`, level: 'info' });
+                
                 const txId = generateZenithUuid();
                 
-                // Stage the text change
+                // Stage the text change (Aligning with Bridge 'content' property)
                 await vscode.commands.executeCommand('zenith.engine.stage', {
                     type: 'TextChange',
                     element: message.zenithId,
-                    newText: message.newText,
+                    newText: message.content || message.newText,
                 });
-
-                // Commit immediately for text edits to ensure persistence on refresh
-                await vscode.commands.executeCommand('zenith.engine.commit', message.zenithId);
                 
-                webview.postMessage({ type: 'log', text: `Updated text: "${message.newText.slice(0, 20)}..."`, level: 'success' });
+                // v11.3: MANUAL PERSISTENCE — Removed immediate commit. 
+                // StagedCount is incremented inside zenith.engine.stage.
+                
+                webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
+                webview.postMessage({ type: 'log', text: `Staged text change: "${message.newText.slice(0, 20)}..."`, level: 'success' });
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Text edit failed: ${e.message}`, level: 'error' });
             }
@@ -1402,30 +1426,35 @@ async function handleWebviewMessage(
         case 'patchStyle':
         case 'stage': {
             const isText = message.type === 'zenithTextEdit' || message.property === 'textContent';
-            const rpcIntent = message.intent || {
-                type: isText ? 'TextChange' : 'PropertyChange',
+            const txId = generateZenithUuid();
+            
+            const rpcIntent = message.intent || (isText ? {
+                type: 'TextChange',
+                element: message.zenithId,
+                newText: message.newText || message.value,
+            } : {
+                type: 'PropertyChange',
                 element: message.zenithId,
                 property: message.property,
                 value: message.value,
-                new_text: message.newText || (isText ? message.value : undefined), 
-            };
+            });
+
             try {
                 if (!handle) throw new Error('Not connected to sidecar');
                 
                 const zenithId = message.zenithId || message.element;
                 const signature = message.signature;
-                const interactionState = message.interactionState || 'base';
 
                 if (zenithId) {
                     await vscode.commands.executeCommand('zenith.engine.stage', rpcIntent);
                 } else if (signature) {
-
+                    // v11.4: Fix missing txId in universal staging
                     await handle.rpc.call('vfs.stage_universal', [
+                        txId,
                         signature,
                         message.property,
                         message.value,
-                        root,
-                        interactionState
+                        root
                     ]);
                 }
                 
@@ -1451,14 +1480,18 @@ async function handleWebviewMessage(
                 if (zenithId) {
                     // Optimized batch staged for existing zenith elements
                     await handle.rpc.call('zenith.engine.stage_batch', [txId, zenithId, styles]);
+                    handle.stagedCount++;
                 } else if (signature) {
                     // Batch for universal elements (future optimization)
                     for (const [prop, val] of Object.entries(styles)) {
-                        await handle.rpc.call('vfs.stage_universal', [signature, prop, val, root]);
+                        await handle.rpc.call('vfs.stage_universal', [txId, signature, prop, val, root]);
+                        handle.stagedCount++;
                     }
                 }
                 
+                updateStatusBar(root);
                 webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
+                webview.postMessage({ type: 'log', text: `Batch update applied to ${zenithId || 'selection'}`, level: 'success' });
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Batch patch failed: ${e.message}`, level: 'error' });
             }
@@ -1474,7 +1507,8 @@ async function handleWebviewMessage(
                     message.value,
                     root
                 ]);
-                
+                handle.stagedCount++;
+                updateStatusBar(root);
                 webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Universal stage failed: ${e.message}`, level: 'error' });

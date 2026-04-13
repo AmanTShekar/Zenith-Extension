@@ -177,8 +177,9 @@ async fn handle_proxy(
     // Change #10: Universal Bridge Injection (Surgical Perfection)
     if is_html {
         let body_str = String::from_utf8_lossy(&body_bytes);
-        if let Some(pos) = body_str.find("</body>") {
-            let mut new_body = String::with_capacity(body_str.len() + 2000);
+        let lower_body = body_str.to_lowercase();
+        if let Some(pos) = lower_body.find("</body>") {
+            let mut new_body = String::with_capacity(body_str.len() + 3000);
             new_body.push_str(&body_str[..pos]);
             new_body.push_str(ZENITH_BRIDGE_INJECTION);
             new_body.push_str(&body_str[pos..]);
@@ -200,6 +201,13 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
   if (window.__zenithBridgeActive) return;
   window.__zenithBridgeActive = true;
   console.log("%c[ZENITH-BRIDGE] %cMechanical Perfection Bridge Active (v5.0)", "color: #00f0ff; font-weight: bold;", "color: inherit;");
+
+  const logToParent = (text, level = 'info') => {
+    window.parent.postMessage({ type: 'log', text: `[BRIDGE] ${text}`, level }, '*');
+    console.log(`[ZENITH-BRIDGE] [${level.toUpperCase()}] ${text}`);
+  };
+
+  logToParent("Bridge Runtime Initialized", "success");
 
   const sanitizeRect = (rect) => ({
     x: rect.x, y: rect.y, width: rect.width, height: rect.height,
@@ -278,7 +286,9 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
       computedStyles: serializeStyles(target),
       componentName: fiber.name,
       source: fiber.source,
-      owner: fiber.owner
+      owner: fiber.owner,
+      classes: Array.from(target.classList),
+      textContent: target.textContent?.slice(0, 100)
     }, '*');
   }, true);
 
@@ -302,14 +312,20 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
   // 2. Inline Editing (Double Click)
   window.addEventListener('dblclick', (e) => {
     const target = e.target.closest('[data-zenith-id]');
-    if (!target || target.childElementCount > 0) return;
+    logToParent(`Double click detected on element: ${target?.tagName || 'none'} (ID: ${target?.getAttribute('data-zenith-id') || 'none'})`);
+    if (!target || target.childElementCount > 0) {
+      if (target && target.childElementCount > 0) logToParent("Edit blocked: Element has child elements.", "warn");
+      return;
+    }
     
     e.preventDefault();
     target.contentEditable = 'true';
     target.focus();
+    logToParent("Inline editing active");
     
     const commit = () => {
       target.contentEditable = 'false';
+      logToParent(`Committing text change: "${target.textContent}"`);
       window.parent.postMessage({
         type: 'zenithTextEdit',
         zenithId: target.getAttribute('data-zenith-id'),
@@ -328,6 +344,44 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
     if (event.data.type === 'zenithSyncMode') {
       isActive = event.data.selectMode;
       console.log("[ZENITH-BRIDGE] Selector Active:", isActive);
+    }
+
+    // [W5] Audit Fix: Remote Pointer Bridge (Interaction Restoration)
+    // Handles inbound hover/select signals from the parent extension's PointerScraper.
+    if (event.data.type === 'zenithHover' && isActive) {
+      const { x, y } = event.data;
+      const target = document.elementFromPoint(x, y)?.closest('[data-zenith-id]');
+      if (target) {
+        window.parent.postMessage({
+          type: 'zenithHover',
+          zenithId: target.getAttribute('data-zenith-id'),
+          rect: sanitizeRect(target.getBoundingClientRect()),
+          tagName: target.tagName.toLowerCase()
+        }, '*');
+      } else {
+        window.parent.postMessage({ type: 'zenithHoverClear' }, '*');
+      }
+    }
+
+    if (event.data.type === 'zenithSelect' && isActive) {
+      const { x, y } = event.data;
+      const target = document.elementFromPoint(x, y)?.closest('[data-zenith-id]');
+      if (target) {
+        const zid = target.getAttribute('data-zenith-id');
+        const fiber = extractFiberMetadata(target);
+        window.parent.postMessage({
+          type: 'zenithSelect',
+          zenithId: zid,
+          element: target.tagName.toLowerCase(),
+          rect: sanitizeRect(target.getBoundingClientRect()),
+          computedStyles: serializeStyles(target),
+          componentName: fiber.name,
+          source: fiber.source,
+          owner: fiber.owner,
+          classes: Array.from(target.classList),
+          textContent: target.textContent?.slice(0, 100)
+        }, '*');
+      }
     }
 
     // Force selection from sidebar
@@ -369,7 +423,7 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
     }
     
     if (event.data.type === 'zenithRequestTree') {
-      console.log("[ZENITH-BRIDGE] Building hierarchy tree");
+      logToParent("Building hierarchy tree...");
       const buildTree = (el) => {
         return Array.from(el.children).filter(c => !['SCRIPT','STYLE'].includes(c.tagName)).map(child => {
           const zid = child.getAttribute('data-zenith-id');
@@ -382,7 +436,9 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
           };
         });
       };
-      window.parent.postMessage({ type: 'zenithHierarchy', tree: buildTree(document.body) }, '*');
+      const tree = buildTree(document.body);
+      logToParent(`Tree built with ${tree.length} top-level nodes`);
+      window.parent.postMessage({ type: 'zenithTreeUpdate', tree }, '*');
     }
   });
 

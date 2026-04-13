@@ -12,9 +12,13 @@ export interface TreeNode {
 interface ExplorerState {
     tree: TreeNode[];
     expandedIds: Set<string>;
+    hiddenIds: Set<string>;
+    lockedIds: Set<string>;
     actions: {
         setTree: (tree: TreeNode[]) => void;
         toggleExpanded: (id: string) => void;
+        toggleVisibility: (id: string) => void;
+        toggleLock: (id: string) => void;
         expandToId: (id: string, tree: TreeNode[]) => void;
     };
 }
@@ -22,6 +26,8 @@ interface ExplorerState {
 export const useExplorerStore = create<ExplorerState>((set) => ({
     tree: [],
     expandedIds: new Set(),
+    hiddenIds: new Set(),
+    lockedIds: new Set(),
     actions: {
         setTree: (tree) => set({ tree }),
         toggleExpanded: (id) => set((state) => {
@@ -29,6 +35,18 @@ export const useExplorerStore = create<ExplorerState>((set) => ({
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return { expandedIds: next };
+        }),
+        toggleVisibility: (id) => set((state) => {
+            const next = new Set(state.hiddenIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return { hiddenIds: next };
+        }),
+        toggleLock: (id) => set((state) => {
+            const next = new Set(state.lockedIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return { lockedIds: next };
         }),
         expandToId: (id, tree) => set((state) => {
             const next = new Set(state.expandedIds);

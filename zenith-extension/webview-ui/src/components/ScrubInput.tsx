@@ -85,7 +85,7 @@ export function ScrubInput({
         <input
           ref={inputRef}
           className={cn(
-            "font-mono text-[12px] text-text-primary bg-elevated border border-accent rounded-sm px-1.5 py-0.5 w-[60px] outline-none shadow-[0_0_0_2px_rgba(0,240,255,0.15)] text-right",
+            "font-mono text-[11px] text-white bg-base border border-accent/40 rounded-sm px-1.5 py-0.5 w-[64px] outline-none shadow-[0_0_20px_rgba(0,240,255,0.1)] text-right",
             className
           )}
           defaultValue={value.toFixed(decimals)}
@@ -122,14 +122,14 @@ export function ScrubInput({
   return (
     <span
       className={cn(
-        "group/scrub flex items-center gap-1 font-mono text-[11px] text-text-primary bg-elevated border border-transparent hover:border-border-normal hover:bg-hover rounded-sm pl-1 pr-1.5 py-0.5 min-w-[48px] text-right cursor-ew-resize select-none transition-colors",
+        "group/scrub flex items-center gap-1 font-mono text-[10px] text-white/90 bg-elevated border border-white/5 hover:border-accent/40 hover:bg-accent/5 rounded-sm pl-1.5 pr-1 py-0.5 min-w-[52px] text-right cursor-ew-resize select-none transition-all",
         className
       )}
       onMouseDown={onMouseDown}
     >
-      {label && <span className="text-[9px] font-black text-white/20 group-hover/scrub:text-accent/60 transition-colors uppercase mr-0.5 pointer-events-none">{label}</span>}
+      {label && <span className="text-[9px] font-black text-white/10 group-hover/scrub:text-accent/60 transition-colors uppercase mr-0.5 pointer-events-none">{label}</span>}
       {value.toFixed(decimals)}
-      <span className="text-text-muted ml-0.5 pointer-events-none">{unit}</span>
+      <span className="text-white/20 ml-0.5 pointer-events-none text-[9px]">{unit}</span>
     </span>
   );
 }

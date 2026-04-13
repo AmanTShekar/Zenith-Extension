@@ -1,64 +1,91 @@
 @import "tailwindcss";
 
 @theme {
-  --color-base:        #080808;
-  --color-surface:     #111111;
-  --color-elevated:    #181818;
-  --color-hover:       #202020;
-  --color-active:      #282828;
+  /* Zenith Base Layers */
+  --color-base:        #000000; /* Pure Black for depth */
+  --color-surface:     #050505; /* Deep Grey Layer */
+  --color-elevated:    #0A0A0A; /* Interactive Layer */
+  --color-hover:       #0F0F0F;
+  --color-active:      #121212;
 
-  --color-accent:         #FFFFFF;
-  --color-accent-dim:     #323232;
+  /* Zenith Signature Accent: Electric Aqua */
+  --color-accent:         #00F0FF; 
+  --color-accent-dim:     rgba(0, 240, 255, 0.05);
+  --color-accent-glow:    rgba(0, 240, 255, 0.1);
 
-  --color-text-primary:   #FFFFFF;
-  --color-text-secondary: #999999;
-  --color-text-muted:     #666666;
+  /* Typography - Studio Grade */
+  --color-text-primary:   #EAEAEA;
+  --color-text-secondary: #888888;
+  --color-text-muted:     #444444;
 
-  --border-subtle:  rgba(255, 255, 255, 0.04);
-  --border-normal:  rgba(255, 255, 255, 0.08);
-  --border-strong:  rgba(255, 255, 255, 0.12);
+  /* Layout - Precision Borders */
+  --color-border-subtle:  rgba(255, 255, 255, 0.02);
+  --color-border-normal:  rgba(255, 255, 255, 0.04);
+  --color-border-strong:  rgba(255, 255, 255, 0.08);
 
-  --radius-xs:  2px;
+  --radius-xs:  1px;
   --radius-sm:  4px;
   --radius-md:  8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
   --radius-2xl: 24px;
 
-  --font-ui:   "Geist", "Inter", system-ui, sans-serif;
+  --font-ui:   "Inter Variable", "Inter", system-ui, sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", monospace;
 }
 
 :root {
-  --glass-bg:       rgba(0, 0, 0, 0.4);
-  --glass-border:   rgba(255, 255, 255, 0.06);
-  --glass-blur:     blur(12px);
+  --glass-bg:       rgba(0, 0, 0, 0.6);
+  --glass-border:   rgba(255, 255, 255, 0.04);
+  --glass-blur:     blur(40px);
+  
+  --shadow-surgical: 0 4px 24px -12px rgba(0,0,0,0.8);
+  --glow-cyan: 0 0 20px rgba(0, 240, 255, 0.08);
 }
 
 @layer base {
   body {
-    @apply bg-base text-text-primary font-ui overflow-hidden;
-    margin: 0;
-    -webkit-font-smoothing: antialiased;
+    @apply bg-base text-text-primary font-ui overflow-hidden antialiased;
     letter-spacing: -0.01em;
   }
 }
 
-.glass-effect {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
+@layer components {
+  /* Precision Glass Surface */
+  .glass-surgical {
+    background: rgba(10, 10, 10, 0.4);
+    backdrop-filter: blur(32px);
+    border: 1px solid var(--color-border-normal);
+    box-shadow: var(--shadow-surgical);
+  }
+
+  /* Deep Obsidian Surface */
+  .glass-obsidian {
+    background: rgba(4, 4, 4, 0.8);
+    backdrop-filter: blur(32px);
+    border: 1px solid rgba(255, 255, 255, 0.03);
+  }
+
+  /* Surgical Input Field */
+  .input-surgical {
+    @apply bg-base border border-border-normal rounded-sm px-2 py-1.5 
+           text-[11px] font-mono text-text-secondary transition-all
+           focus:border-accent/40 focus:text-white outline-none;
+  }
+
+  /* Grid Texture */
+  .canvas-grid {
+    position: absolute; inset: 0;
+    background-image: 
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
 }
 
-.canvas-grid {
-  position: absolute; inset: 0;
-  background-image: radial-gradient(circle, rgba(255,255,255,0.04) 0.5px, transparent 0.5px);
-  background-size: 20px 20px;
-  pointer-events: none;
-}
-
-/* Custom Scrollbar */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+/* Custom Scrollbar — Senior Dev Grade */
+::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: var(--bg-active); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); border-radius: 10px; transition: background 0.2s; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }

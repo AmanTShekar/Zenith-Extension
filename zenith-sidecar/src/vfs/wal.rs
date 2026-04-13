@@ -113,27 +113,60 @@ impl WalWriter {
     }
 
     /// Truncate the WAL (after a successful snapshot checkpoint).
-    /// v3.14: Uses in-place truncation for 100% Windows stability (v11.7.5 Hardening).
+    /// v3.14: Uses in-place truncation for 100% Windows stability (v11.7.6 Hardening).
     pub fn truncate(&mut self) -> io::Result<()> {
         let mut file = if let Some(writer) = self.file.take() {
             // 1. Flush and recover the raw file handle
-            let mut inner = writer.into_inner().map_err(|e| e.into_error())?;
-            inner.flush()?;
-            inner
+            match writer.into_inner() {
+                Ok(f) => f,
+                Err(e) => {
+                    // Restoration logic: If flushing failed, we MUST put the handle back
+                    // so the WAL doesn't stay closed forever.
+                    self.file = Some(e.into_inner());
+                    return Err(io::Error::new(io::ErrorKind::Other, "Failed to flush WAL during truncation"));
+                }
+            }
         } else {
             return Err(io::Error::new(io::ErrorKind::Other, "WAL file not open"));
         };
 
-        // 2. In-place truncation while holding the handle
-        file.set_len(0)?;
-        file.seek(std::io::SeekFrom::Start(0))?;
+        // 2. In-place truncation with Retry Loop (Windows Lock Resilience)
+        let mut attempts = 0;
+        let mut success = false;
+        while attempts < 5 && !success {
+            match file.set_len(0) {
+                Ok(_) => {
+                    if let Err(e) = file.seek(std::io::SeekFrom::Start(0)) {
+                        self.file = Some(BufWriter::new(file));
+                        return Err(e);
+                    }
+                    success = true;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(5) => {
+                    attempts += 1;
+                    warn!("  ⚠️ WAL truncation blocked by Windows file-lock. Retrying in 100ms... (Attempt {})", attempts);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => {
+                    self.file = Some(BufWriter::new(file));
+                    return Err(e);
+                }
+            }
+        }
 
-        // 3. Re-initialize the Buffered writer
+        // 3. Re-initialize the Buffered writer regardless of truncation success
+        // if truncation failed after all retries, we still have a working file handle
+        // and can continue staging in-memory and logging to the tail of the wal.
         self.file = Some(BufWriter::new(file));
         self.entries_since_sync = 0;
         
-        info!("WAL truncated in-place (v11.7.6 Windows hardening)");
-        Ok(())
+        if success {
+            info!("WAL truncated in-place (v11.7.6 Windows hardening)");
+            Ok(())
+        } else {
+            warn!("  ⚠️ WAL truncation failed after 5 attempts. Log remains bloated but operational.");
+            Ok(())
+        }
     }
 }
 

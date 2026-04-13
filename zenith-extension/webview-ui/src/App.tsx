@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { vscode } from './bridge';
+import { clsx } from 'clsx';
 import { 
   useSelectionStore, 
   useCanvasStore, 
@@ -12,11 +13,16 @@ import { Toolbar } from './components/Toolbar';
 import { LeftSidebar } from './components/sidebar/LeftSidebar';
 import { InspectorPanel } from './components/InspectorPanel';
 import { Canvas } from './components/Canvas';
+import { ZoomPill } from './components/ZoomPill';
 import { HomeView } from './components/HomeView';
 import { QuickStartGuide } from './components/QuickStartGuide';
 import { AuditPanel } from './components/AuditPanel';
 
 const App: React.FC = () => {
+  /* 
+     v11.7: Forced Landing Enforcement.
+     Starting view is strictly 'home' (Director's Hub).
+  */
   const [view, setView] = useState<'home' | 'canvas'>('home');
   const [manualUrl, setManualUrl] = useState('http://localhost:5173');
   const [isQuickStartOpen, setIsQuickStartOpen] = useState(false);
@@ -31,23 +37,12 @@ const App: React.FC = () => {
   const detectedServers = useSystemStore(state => state.detectedServers || []);
   const stagedCount = useSelectionStore(state => state.stagedCount);
 
+  const systemActions = useSystemStore(state => state.actions);
+  const logActions = useLogStore(state => state.actions);
   const selectionActions = useSelectionStore(state => state.actions);
   const canvasActions = useCanvasStore(state => state.actions);
   const explorerActions = useExplorerStore(state => state.actions);
-  const systemActions = useSystemStore(state => state.actions);
-  const logActions = useLogStore(state => state.actions);
-
-  // Navigation: Jump to canvas ONLY if on the home screen and a URL is detected
-  useEffect(() => {
-    if (devServerUrl && view === 'home') {
-       // v11.3: Defer navigation to broad-cast phase to avoid cascading render task
-       Promise.resolve().then(() => {
-         setView('canvas');
-         canvasActions.setPan(0, 0);
-         canvasActions.setZoom(1);
-       });
-    }
-  }, [devServerUrl, view, canvasActions]);
+  const previewMode = useSystemStore(state => state.previewMode);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -101,6 +96,18 @@ const App: React.FC = () => {
             explorerActions.setTree(m.tree || []);
             break;
 
+          case 'log':
+            logActions.add(m.level || 'info', m.text);
+            break;
+
+          case 'zenithTextEdit':
+          case 'zenithRequestTree':
+          case 'zenithOpenSource':
+            // v11.3 Hardening: Seamless Bridge -> Extension Forwarding
+            vscode.postMessage(m);
+            break;
+
+          case 'zenithSelect':
           case 'zenithSelectExtended':
             selectionActions.setSelected(
               m.zenithId,
@@ -177,6 +184,10 @@ const App: React.FC = () => {
       if (e.altKey && e.key.toLowerCase() === 'd') {
         systemActions.toggleDebugMode();
       }
+
+      if (e.key.toLowerCase() === 'p') {
+        systemActions.togglePreview();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -196,21 +207,18 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-[#050505] text-[#E0E0E0] overflow-hidden selection:bg-cyan-500/30">
-      {/* Studio Header: Force Fixed Height */}
+    <div className="flex flex-col h-screen bg-black text-text-primary overflow-hidden selection:bg-accent/10">
+      {/* Studio Toolbar (Fixed Position) */}
       <Toolbar 
         projectName={projectName}
         surgicalMode={surgicalMode}
-        houdiniActive={false}
-        connectedServer={connectedServer}
         onToggleSurgical={() => vscode.postMessage({ type: 'toggleSurgical' })}
         onHome={() => setView('home')}
-        onOpenQuickStart={() => setIsQuickStartOpen(true)}
         onPublish={() => vscode.postMessage({ type: 'commit' })}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 relative overflow-hidden flex flex-col h-screen">
+      <div className="flex-1 relative overflow-hidden flex flex-col pt-20">
         {view === 'home' ? (
           <div className="flex-1 overflow-y-auto">
             <HomeView 
@@ -231,25 +239,24 @@ const App: React.FC = () => {
           </div>
         ) : (
           <div className="flex-1 flex overflow-hidden">
-            <LeftSidebar />
-            <main className="flex-1 relative bg-[#0a0a0a] overflow-hidden">
-               <Canvas devServerUrl={devServerUrl} isSpacePressed={isSpacePressed} />
-               {debugMode && <AuditPanel />}
-            </main>
-            <InspectorPanel />
+             {!previewMode && <LeftSidebar />}
+             <main className="flex-1 relative bg-surface border-x border-border-subtle overflow-hidden">
+                <Canvas devServerUrl={devServerUrl} isSpacePressed={isSpacePressed} />
+                {!previewMode && <ZoomPill />}
+                {debugMode && <AuditPanel />}
+             </main>
+             {!previewMode && <InspectorPanel />}
           </div>
         )}
 
-        {/* Visibility Safety Overlay / Status Pill */}
-        <div className="fixed bottom-4 right-4 z-[9999] pointer-events-none">
-          <div className={`px-3 py-1.5 rounded-full text-[10px] font-mono border backdrop-blur-md flex items-center gap-2 ${
-            connectedServer 
-              ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.1)]' 
-              : 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse'
-          }`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${connectedServer ? 'bg-cyan-400' : 'bg-red-400'}`} />
-            {connectedServer ? 'ZENITH ENGINE ONLINE' : 'DISCONNECTED'}
-          </div>
+        {/* Visibility Safety Overlay / System Log */}
+        <div className="fixed bottom-4 left-4 z-[9999] pointer-events-none opacity-40 hover:opacity-100 transition-opacity">
+           <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-surface border border-border-normal text-[9px] font-mono tracking-tighter">
+              <span className="text-text-muted">SYSTEM STATUS //</span>
+              <span className={connectedServer ? 'text-accent' : 'text-red-500'}>
+                {connectedServer ? 'ONLINE' : 'OFFLINE'}
+              </span>
+           </div>
         </div>
       </div>
 

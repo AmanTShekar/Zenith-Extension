@@ -339,49 +339,64 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
           {node.componentName ? (
             <>
               <span className={clsx(
-                'text-[11.5px] font-bold truncate',
-                isSelected ? 'text-[#00f2ff]' : 'text-purple-300'
+                'text-[10.5px] font-bold truncate',
+                isSelected ? 'text-[#00F0FF]' : 'text-purple-300'
               )}>
                 {node.componentName}
               </span>
-              <span className="text-[9px] opacity-20 font-mono lower tracking-tighter">{node.tagName}</span>
+              <span className="text-[8px] opacity-20 font-mono tracking-tighter uppercase">{node.tagName}</span>
             </>
           ) : (
             <span className={clsx(
-              'text-[11.5px] font-medium truncate',
-              !node.isZenithElement && 'italic opacity-30 text-[10px]'
+              'text-[10.5px] font-medium truncate',
+              isSelected ? 'text-[#00F0FF]' : 'opacity-80',
+              !node.isZenithElement && 'italic opacity-30 text-[9px]'
             )}>
               {node.tagName}
             </span>
           )}
         </div>
 
+        {/* Studio Layer Controls — Visibility & Lock (Onlook Signature) */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mr-1">
+          <button
+            onClick={e => { 
+                e.stopPropagation(); 
+                actions.toggleVisibility(node.id);
+                vscode.postMessage({ type: 'toggleVisibility', zenithId: node.id });
+            }}
+            className={clsx(
+                "p-1 hover:bg-white/10 rounded transition-colors",
+                useExplorerStore.getState().hiddenIds.has(node.id) ? "text-yellow-500" : "text-white/30 hover:text-white"
+            )}
+            title="Toggle Visibility"
+          >
+            <i className={clsx("ph text-[10px]", useExplorerStore.getState().hiddenIds.has(node.id) ? "ph-eye-slash" : "ph-eye")} />
+          </button>
+          <button
+            onClick={e => { 
+                e.stopPropagation(); 
+                actions.toggleLock(node.id);
+                vscode.postMessage({ type: 'toggleLock', zenithId: node.id });
+            }}
+            className={clsx(
+                "p-1 hover:bg-white/10 rounded transition-colors",
+                useExplorerStore.getState().lockedIds.has(node.id) ? "text-red-500" : "text-white/30 hover:text-white"
+            )}
+            title="Lock Layer"
+          >
+            <i className={clsx("ph text-[10px]", useExplorerStore.getState().lockedIds.has(node.id) ? "ph-lock-simple-fill" : "ph-lock-simple")} />
+          </button>
+        </div>
+
         {node.className && (
-          <span className="text-[9px] opacity-20 group-hover:opacity-60 truncate font-mono shrink-0 max-w-[60px] mr-2">
+          <span className="text-[8px] opacity-20 group-hover:opacity-60 truncate font-mono shrink-0 max-w-[40px] mr-1">
             .{node.className.split(' ')[0]}
           </span>
         )}
 
-        {/* Quick action buttons — show on hover */}
-        <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          <button
-            onClick={e => { e.stopPropagation(); vscode.postMessage({ type: 'structuralOperation', operation: 'duplicate', zenithId: node.id }); }}
-            title="Duplicate"
-            className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-white text-[10px]"
-          >
-            <i className="ph ph-copy" />
-          </button>
-          <button
-            onClick={e => { e.stopPropagation(); vscode.postMessage({ type: 'structuralOperation', operation: 'delete', zenithId: node.id }); }}
-            title="Delete"
-            className="p-1 hover:bg-red-500/10 rounded text-white/40 hover:text-red-400 text-[10px]"
-          >
-            <i className="ph ph-trash" />
-          </button>
-        </div>
-
         {isSelected && (
-          <div className="w-1.5 h-1.5 rounded-full bg-[#00f2ff] shadow-[0_0_10px_#00f2ff] animate-pulse shrink-0 ml-1" />
+          <div className="w-1 h-1 rounded-full bg-[#00F0FF] shadow-[0_0_8px_#00F0FF] animate-pulse shrink-0" />
         )}
       </div>
 

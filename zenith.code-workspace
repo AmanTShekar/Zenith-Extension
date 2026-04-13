@@ -1,0 +1,43 @@
+{
+  "folders": [
+    {
+      "name": "🔱 ZENITH ROOT",
+      "path": "."
+    },
+    {
+      "name": "🧪 ZENITH DEMO",
+      "path": "zenith-demo"
+    },
+    {
+      "name": "🧩 ZENITH EXTENSION",
+      "path": "zenith-extension"
+    },
+    {
+      "name": "⚙️ ZENITH SIDECAR",
+      "path": "zenith-sidecar"
+    },
+    {
+      "name": "⚡ ZENITH VITE PLUGIN",
+      "path": "zenith-vite-plugin"
+    },
+    {
+      "name": "⚛️ ZENITH NEXT PLUGIN",
+      "path": "zenith-next-plugin"
+    },
+    {
+      "name": "🎨 WEBSITE",
+      "path": "website"
+    },
+    {
+      "name": "🛸 SPACE SCROLL DEMO",
+      "path": "space-scroll-demo"
+    }
+  ],
+  "settings": {
+    "workbench.colorCustomizations": {
+      "activityBar.background": "#020202",
+      "sideBar.background": "#050505",
+      "editor.background": "#020202"
+    }
+  }
+}

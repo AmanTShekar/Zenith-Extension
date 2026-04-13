@@ -132,6 +132,9 @@ pub trait ZenithApi {
 
     #[method(name = "zenith.sandbox.stop")]
     async fn stop_sandbox(&self, listen_port: u16) -> RpcResult<bool>;
+
+    #[method(name = "vfs.harden_wal")]
+    async fn harden_wal(&self) -> RpcResult<bool>;
 }
 
 #[derive(Clone)]
@@ -379,6 +382,13 @@ impl ZenithApiServer for ZenithRpc {
         } else {
             Ok(false)
         }
+    }
+
+    async fn harden_wal(&self) -> RpcResult<bool> {
+        let mut vfs = self.state.vfs.write().await;
+        vfs.truncate_wal().map_err(internal_error)?;
+        info!("[RPC] vfs.harden_wal: WAL truncated successfully");
+        Ok(true)
     }
 }
 

@@ -1,6 +1,6 @@
 import { useSelectionStore } from '../../../stores';
 import { useState } from 'react';
-import clsx from 'clsx';
+import { clsx } from 'clsx';
 
 interface ScrubInputProps {
   prop: string;

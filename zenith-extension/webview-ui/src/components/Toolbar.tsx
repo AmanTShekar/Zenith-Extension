@@ -1,35 +1,32 @@
 import { clsx } from 'clsx';
 import { useSelectionStore, useCanvasStore, useSystemStore } from '../stores';
-import { vscode } from '../bridge';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function Toolbar({ 
   projectName, 
   surgicalMode, 
-  houdiniActive, 
-  connectedServer, 
   onToggleSurgical,
   onHome,
-  onOpenQuickStart,
   onPublish: onPropPublish,
 }: { 
   projectName: string;
   surgicalMode: boolean; 
-  houdiniActive: boolean;
-  connectedServer: string | null;
   onToggleSurgical: () => void;
   onHome: () => void;
-  onOpenQuickStart: () => void;
   onPublish: () => void;
 }) {
   const liveSave = useSelectionStore(state => state.liveSave);
   const stagedCount = useSelectionStore(state => state.stagedCount);
   const historyIndex = useSelectionStore(state => state.historyIndex);
   const history = useSelectionStore(state => state.history);
-  const { toggleLiveSave, undo, redo, commitAll } = useSelectionStore(state => state.actions);
+  const { undo, redo, commitAll } = useSelectionStore(state => state.actions);
+  const connectedServer = useSystemStore(state => state.connectedServer);
+  const previewMode = useSystemStore(state => state.previewMode);
 
   const {
-      deviceType, viewMode, activeTool, actions: { setDevice, setTool, setViewMode }
+      deviceType, 
+      activeTool,
+      actions: { setDevice, setTool }
   } = useCanvasStore();
 
   const canUndo = historyIndex > 0;
@@ -43,129 +40,150 @@ export function Toolbar({
 
   return (
     <motion.div 
-      initial={{ y: -50, opacity: 0 }}
+      initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="fixed top-4 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 px-3 py-1.5 bg-[#121212]/40 backdrop-blur-3xl border border-white/10 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.5)]"
+      className="fixed top-5 left-1/2 -translate-x-1/2 z-[1000] flex items-center h-12 px-1.5 bg-black/40 backdrop-blur-2xl border border-white/[0.04] rounded-xl shadow-2xl"
     >
-      {/* Home & Status */}
-      <div className="flex items-center gap-2 pr-3 border-r border-white/10">
+      {/* Home / Breadcrumb */}
+      <div className="flex items-center gap-2 px-2 border-r border-white/5">
         <button 
           onClick={onHome}
-          className="w-8 h-8 rounded-full bg-white/5 border border-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all active:scale-95"
+          className="w-8 h-8 rounded-lg hover:bg-white/5 flex items-center justify-center text-text-secondary hover:text-white transition-all active:scale-95"
+          title="Back to Studio Hub"
         >
-          <i className="ph-bold ph-house-line text-sm" />
+          <i className="ph-fill ph-house-line text-lg" />
         </button>
-        <span className="text-[9px] font-black text-white/40 tracking-widest uppercase truncate max-w-[80px] hidden sm:inline">{projectName}</span>
+        <div className="h-4 w-px bg-white/5" />
+        <span className="text-[10px] font-black text-text-secondary tracking-widest uppercase truncate max-w-[120px] px-1">{projectName || 'UNNAMED'}</span>
       </div>
 
-      {/* Primary Tools */}
-      <div className="flex items-center gap-1">
-        <button 
-          onClick={() => setTool('select')}
-          className={clsx(
-            "w-9 h-9 rounded-full flex items-center justify-center transition-all",
-            activeTool === 'select' ? "bg-white text-black shadow-xl" : "text-white/30 hover:text-white hover:bg-white/5"
-          )}
-        >
-          <i className="ph-fill ph-cursor-click text-lg" />
-        </button>
-        <button 
-          onClick={() => setTool('hand')}
-          className={clsx(
-            "w-9 h-9 rounded-full flex items-center justify-center transition-all",
-            activeTool === 'hand' ? "bg-white text-black shadow-xl" : "text-white/30 hover:text-white hover:bg-white/5"
-          )}
-        >
-          <i className="ph-fill ph-hand-grabbing text-lg" />
-        </button>
+      {/* Engine Status */}
+      <div className="flex items-center gap-1 px-3 border-r border-white/5 group relative cursor-help">
+         <div className={`w-1.5 h-1.5 rounded-full ${connectedServer ? 'bg-accent shadow-[0_0_8px_#00f0ff]' : 'bg-red-500 animate-pulse'}`} />
+         <span className="text-[9px] font-black text-text-muted uppercase tracking-[0.2em]">{connectedServer ? 'Active' : 'Offline'}</span>
       </div>
 
-      <div className="w-px h-6 bg-white/10 mx-1" />
-
-      {/* Viewport Controls */}
-      <div className="flex items-center gap-1">
-         <button 
+      {/* Viewport & Device Controls */}
+      <div className="flex items-center gap-1 px-2 border-r border-white/5">
+        <button 
           onClick={() => setDevice('mobile', 390, 844)}
           className={clsx(
-            "w-8 h-8 rounded-full flex items-center justify-center transition-all",
-            deviceType === 'mobile' ? "text-[#00f2ff] bg-[#00f2ff]/10" : "text-white/20 hover:text-white"
+            "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
+            deviceType === 'mobile' ? "text-accent bg-accent/10 shadow-[0_0_15px_rgba(0,240,255,0.1)]" : "text-text-muted hover:text-text-secondary hover:bg-white/5"
           )}
         >
-          <i className="ph-bold ph-device-mobile text-sm" />
+          <i className="ph ph-device-mobile text-base" />
         </button>
         <button 
           onClick={() => setDevice('desktop', 1440, 900)}
           className={clsx(
-            "w-8 h-8 rounded-full flex items-center justify-center transition-all",
-            deviceType === 'desktop' ? "text-[#00f2ff] bg-[#00f2ff]/10" : "text-white/20 hover:text-white"
+            "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
+            deviceType === 'desktop' ? "text-accent bg-accent/10 shadow-[0_0_15px_rgba(0,240,255,0.1)]" : "text-text-muted hover:text-text-secondary hover:bg-white/5"
           )}
         >
-          <i className="ph-bold ph-desktop text-sm" />
-        </button>
-        <button 
-          onClick={() => setViewMode(viewMode === 'single' ? 'multi' : 'single')}
-          className={clsx(
-            "w-8 h-8 rounded-full flex items-center justify-center transition-all ml-1",
-            viewMode === 'multi' ? "bg-blue-500 text-white" : "text-white/20 hover:text-white"
-          )}
-        >
-          <i className="ph-bold ph-squares-four text-sm" />
+          <i className="ph ph-desktop text-base" />
         </button>
       </div>
 
-      <div className="w-px h-6 bg-white/10 mx-1" />
+      {/* Main Creative Tools (Merged from FloatingToolbar) */}
+      <div className="flex items-center gap-1 px-2 border-r border-white/5">
+        {[
+          { id: 'select', icon: 'ph-cursor', label: 'Select (V)' },
+          { id: 'hand',   icon: 'ph-hand-grabbing', label: 'Hand (H)' },
+          { id: 'text',   icon: 'ph-text-t', label: 'Text (T)' },
+          { id: 'insert', icon: 'ph-plus-circle', label: 'Insert (I)' },
+        ].map((tool) => (
+          <button
+            key={tool.id}
+            onClick={() => setTool(tool.id as any)}
+            title={tool.label}
+            className={clsx(
+              "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
+              activeTool === tool.id 
+                ? "bg-accent text-black shadow-lg" 
+                : "text-text-muted hover:text-white hover:bg-white/5"
+            )}
+          >
+            <i className={clsx("ph ph-bold", tool.icon)} />
+          </button>
+        ))}
+      </div>
 
-      {/* Operations */}
-      <div className="flex items-center gap-1.5 pl-1">
-        <div className="flex items-center gap-0.5 bg-white/5 rounded-full p-0.5">
+      {/* History Controls (Undo/Redo) */}
+      <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
           <button 
-             onClick={undo}
-             disabled={!canUndo}
-             title="Undo (Ctrl+Z)"
-             className={clsx(
-               "w-8 h-8 flex items-center justify-center rounded-full transition-all",
-               canUndo ? "text-white/80 hover:text-white hover:bg-white/10 cursor-pointer" : "text-white/10 cursor-not-allowed"
-             )}
+              onClick={undo}
+              disabled={!canUndo}
+              className={clsx(
+                "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
+                canUndo ? "text-text-secondary hover:text-white hover:bg-white/5" : "text-white/5"
+              )}
           >
-             <i className="ph-bold ph-arrow-u-up-left text-sm" />
+              <i className="ph ph-arrow-u-up-left" />
           </button>
-          
           <button 
-             onClick={redo}
-             disabled={!canRedo}
-             title="Redo (Ctrl+Shift+Z)"
-             className={clsx(
-               "w-8 h-8 flex items-center justify-center rounded-full transition-all",
-               canRedo ? "text-white/80 hover:text-white hover:bg-white/10 cursor-pointer" : "text-white/10 cursor-not-allowed"
-             )}
+              onClick={redo}
+              disabled={!canRedo}
+              className={clsx(
+                "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
+                canRedo ? "text-text-secondary hover:text-white hover:bg-white/5" : "text-white/5"
+              )}
           >
-             <i className="ph-bold ph-arrow-u-up-right text-sm" />
+              <i className="ph ph-arrow-u-up-right" />
           </button>
-        </div>
+      </div>
+
+      {/* Main Mode Toggle & Preview */}
+      <div className="flex items-center gap-2 pl-2 pr-1">
+        <button 
+          onClick={() => useSystemStore.getState().actions.togglePreview()}
+          className={clsx(
+            "h-8 px-3 rounded-lg flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.2em] transition-all",
+            previewMode 
+              ? "bg-green-500 text-black shadow-[0_0_20px_rgba(34,197,94,0.3)]" 
+              : "text-text-secondary bg-white/5 hover:bg-white/10"
+          )}
+          title={previewMode ? "Exit Preview" : "Enter Interactive Preview"}
+        >
+          <i className={clsx("ph-fill text-sm", previewMode ? "ph-stop" : "ph-play")} />
+          {previewMode ? "Stop" : "Preview"}
+        </button>
+
+        <div className="h-4 w-px bg-white/5 mx-1" />
 
         <button 
           onClick={onToggleSurgical}
           className={clsx(
-            "h-9 px-4 rounded-full flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all",
-            surgicalMode ? "bg-[#00f2ff] text-black shadow-[0_0_20px_rgba(0,242,255,0.4)]" : "text-white/40 bg-white/5 hover:bg-white/10"
+            "h-8 px-4 rounded-lg flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.2em] transition-all",
+            surgicalMode 
+              ? "bg-accent text-black shadow-[0_0_20px_rgba(0,240,255,0.2)]" 
+              : "text-text-secondary bg-white/5 hover:bg-white/10"
           )}
         >
-          <i className="ph-fill ph-lightning text-sm" />
-          <span className="hidden lg:inline">Surgical</span>
+          <i className={`ph-fill ph-syringe text-sm transition-transform ${surgicalMode ? 'rotate-45' : ''}`} />
+          Surgical
         </button>
 
-        <button 
-          className={clsx(
-            "h-9 px-5 flex items-center gap-2 rounded-full font-black text-[10px] uppercase tracking-widest transition-all",
-            hasChanges 
-              ? "bg-white text-black shadow-[0_10px_30px_rgba(255,255,255,0.2)] hover:scale-[1.02] active:scale-95" 
-              : "bg-white/5 text-white/5 cursor-not-allowed"
+        <AnimatePresence mode="popLayout">
+          {hasChanges && (
+            <motion.button 
+              initial={{ x: 20, opacity: 0, width: 0 }}
+              animate={{ x: 0, opacity: 1, width: 'auto' }}
+              exit={{ x: 20, opacity: 0, width: 0 }}
+              className="h-8 px-4 flex items-center gap-2 rounded-lg bg-white text-black hover:bg-[#F2F2F2] active:scale-95 font-black text-[9px] uppercase tracking-[0.2em] relative overflow-hidden shrink-0"
+              onClick={onPublish}
+            >
+               <motion.div 
+                 layoutId="pulse"
+                 className="absolute inset-0 bg-accent/20 animate-pulse pointer-events-none"
+               />
+               <span className="relative z-10 flex items-center gap-2">
+                 <i className="ph-fill ph-check-circle text-xs" />
+                 Commit
+               </span>
+            </motion.button>
           )}
-          onClick={onPublish}
-          disabled={!hasChanges}
-        >
-           Commit
-        </button>
+        </AnimatePresence>
       </div>
     </motion.div>
   );

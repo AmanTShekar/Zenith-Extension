@@ -323,6 +323,7 @@ impl VirtualFileSystem {
         value: String,
         project_root: &Path,
     ) -> Result<()> {
+        info!("[VFS] stage_universal — tx={tx} signature={:?} property={property} value=\"{value}\"", signature);
         let mut target_file = None;
         let mut best_pos = None;
 
@@ -337,12 +338,24 @@ impl VirtualFileSystem {
 
         if let (Some(file), Some((line, col))) = (target_file, best_pos) {
             let element_id = format!("{}:{}:{}", file.to_string_lossy(), line, col);
-            let intent = crate::conflict::ot_engine::MutationIntent::PropertyChange {
-                element: element_id,
-                property,
-                value,
-                timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+
+            let intent = if property == "textContent" {
+                crate::conflict::ot_engine::MutationIntent::TextChange {
+                    element: element_id,
+                    new_text: value,
+                    signature: Some(signature),
+                    timestamp,
+                }
+            } else {
+                crate::conflict::ot_engine::MutationIntent::PropertyChange {
+                    element: element_id,
+                    property,
+                    value,
+                    timestamp,
+                }
             };
+            
             self.stage_mutation(tx, intent, project_root)?;
             Ok(())
         } else {
@@ -422,6 +435,16 @@ impl VirtualFileSystem {
         self.rebuild_merged_cache(&file);
     }
 
+    /// Truncate the Write-Ahead Log to prune resolved staging entries.
+    /// This is a real "hardening" operation that prunes the .wal file.
+    pub fn truncate_wal(&mut self) -> Result<()> {
+        if let Some(ref mut wal) = self.stage_wal {
+            wal.truncate().map_err(|e| anyhow!("WAL truncation failed: {}", e))
+        } else {
+            Ok(()) // WAL not enabled, nothing to truncate
+        }
+    }
+
     /// Stage a high-level mutation intent (Surgical Mode).
     /// Handles the transformation of intent -> file patch.
     /// 
@@ -432,6 +455,7 @@ impl VirtualFileSystem {
         intent: crate::conflict::ot_engine::MutationIntent, 
         project_root: &Path
     ) -> Result<(crate::conflict::ot_engine::TransformResult, Option<ZenithId>)> {
+        info!("[VFS] stage_mutation — tx={tx} intent={:?}", intent);
         use crate::conflict::ot_engine::{OtEngine, TransformResult};
 
         // 1. Conflict Detection: Check against all other active transactions
@@ -502,6 +526,7 @@ impl VirtualFileSystem {
 
         // 3. Stage to WAL and merged cache
         let file = path.clone();
+        info!("  [VFS] Staging patch to {:?} (TX: {})", file, tx);
         self.stage(tx, FilePatch {
             file,
             edits: vec![edit],
@@ -613,14 +638,16 @@ impl VirtualFileSystem {
                     serde_json::json!({ "zenithId": element_id, "styles": { property: final_val } })
                 }
             }
-            
             MutationIntent::BatchPropertyChange { styles, .. } => {
                 let mut normalized_styles = HashMap::new();
                 let mut text_content = None;
+                let mut class_name = None;
 
                 for (p, v) in styles {
                     if p == "textContent" {
                         text_content = Some(v.clone());
+                    } else if p == "className" {
+                        class_name = Some(v.clone());
                     } else if is_css(p) {
                         normalized_styles.insert(p.clone(), normalize(p, v.clone()));
                     } else {
@@ -628,11 +655,20 @@ impl VirtualFileSystem {
                     }
                 }
 
-                serde_json::json!({
+                let mut json = serde_json::json!({
                     "zenithId": element_id,
                     "styles": normalized_styles,
-                    "textContent": text_content
-                })
+                });
+                
+                if let Some(txt) = text_content {
+                    json["textContent"] = serde_json::Value::String(txt);
+                }
+                
+                if let Some(cn) = class_name {
+                    json["className"] = serde_json::Value::String(cn);
+                }
+                
+                json
             }
 
 
@@ -1079,6 +1115,7 @@ impl VirtualFileSystem {
         match apply_edits(base_content, &all_edits) {
             Ok(merged) => {
                 self.merged_cache.insert(file.to_path_buf(), Arc::new(merged));
+                info!("[SIDECAR] VFS cache updated — file={:?} ({} edits merged)", file, all_edits.len());
             }
             Err(e) => {
                 warn!("Failed to rebuild merged cache for {:?}: {e}", file);
@@ -1242,20 +1279,46 @@ impl VirtualFileSystem {
                     std::fs::create_dir_all(parent)?;
                 }
 
-                // Atomic Write: Write to temp file and rename.
-                let temp_path = full_path.with_extension("zenith_tmp");
-                if let Err(e) = std::fs::write(&temp_path, content.as_bytes()) {
-                    tracing::error!("Failed to write temp file {:?}: {}", temp_path, e);
-                    return Err(anyhow!("File I/O error writing temp file: {}", e));
+                // Surgical In-Place Write (v11.7.6 Windows Hardening)
+                // Atomic rename fails on Windows when Vite/Watcher has a lock. 
+                // We use direct write with a retry loop to ensure persistence.
+                let mut attempts = 0;
+                let mut success = false;
+                while attempts < 5 && !success {
+                    match std::fs::OpenOptions::new()
+                        .write(true)
+                        .truncate(true)
+                        .create(true)
+                        .open(&full_path) 
+                    {
+                        Ok(mut file) => {
+                            use std::io::Write;
+                            if let Err(e) = file.write_all(content.as_bytes()) {
+                                tracing::error!("Failed to write to file {:?}: {}", full_path, e);
+                                return Err(anyhow!("File I/O error during surgical write: {}", e));
+                            }
+                            // Ensure data is on disk before we consider it a success
+                            file.sync_all()?;
+                            success = true;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(5) => {
+                            attempts += 1;
+                            warn!("  ⚠️ File lock detected on {:?}. Retrying in 200ms... (Attempt {})", file_path, attempts);
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                        }
+                        Err(e) => return Err(anyhow!("Failed to open file {:?} for write: {}", full_path, e)),
+                    }
                 }
-
-                if let Err(e) = std::fs::rename(&temp_path, &full_path) {
-                    tracing::error!("Failed to rename temp file to {:?}: {}", full_path, e);
-                    let _ = std::fs::remove_file(&temp_path);
-                    return Err(anyhow!("Atomic rename failed for {:?}: {}. Is the file open in another program?", file_path, e));
+                
+                if !success {
+                    return Err(anyhow!("Surgical persistence failed: File {:?} is currently locked by another process (likely the Vite watcher). Close other editors or stop the server briefly if this persists.", file_path));
                 }
 
                 info!("  ✅ Persisted: {:?}", file_path);
+                
+                // Audit the persisted content (first 100 bytes)
+                let preview = if content.len() > 100 { &content[..100] } else { &content };
+                debug!("  📄 Content preview: {:?}", preview);
 
                 // Reconcile base layer (memory-only update of the original snapshots)
                 self.base.insert(file_path, Arc::new(FileSnapshot::from_content(content.to_string())));

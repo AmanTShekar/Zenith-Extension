@@ -2,6 +2,7 @@ import { DESIGN_SCHEMA, type PropertyDefinition } from '../../config/schema';
 import { useSelectionStore } from '../../stores';
 import { ScrubInput } from '../ScrubInput';
 import { SpacingBox } from '../sidebar/properties/SpacingBox';
+import { clsx } from 'clsx';
 
 interface PropertyFieldProps {
   property: string;
@@ -24,30 +25,52 @@ function PropertyField({ property, definition, value, sectionValues, onChange, o
 
   switch (definition.type) {
 
-    // --- Radio button group (new: for display, textAlign, flexDirection, etc.) ---
+    // --- Visual Radio/Icon Toggle (for Layout/Text Alignment) ---
     case 'radio':
       return (
         <div className="flex items-center justify-between py-1 group px-4 hover:bg-white/[0.02] transition-colors">
-          <span className="text-[10px] text-text-muted font-medium w-16 shrink-0 truncate">{label}</span>
+          <span className="text-[10px] text-text-muted font-medium w-16 shrink-0 truncate uppercase tracking-tighter opacity-60">
+            {label}
+          </span>
           <div className="flex items-center gap-0.5 flex-1 justify-end flex-wrap">
-            {definition.options?.map(opt => (
-              <button
-                key={opt.value}
-                onClick={() => {
-                  onChange(opt.value);
-                  onCommit?.(opt.value);
-                }}
-                title={opt.label}
-                className={[
-                  'px-2 py-0.5 text-[9px] rounded transition-all border',
-                  value === opt.value
-                    ? 'bg-blue-500/20 border-blue-500/60 text-blue-300 font-bold'
-                    : 'bg-white/5 border-white/10 text-white/40 hover:text-white/70 hover:bg-white/10',
-                ].join(' ')}
-              >
-                {opt.label}
-              </button>
-            ))}
+            {definition.options?.map(opt => {
+              const isSelected = value === opt.value;
+              // Onlook Trait: Visual Iconography for Directions/Alignments
+              const getIcon = (val: string) => {
+                switch(val) {
+                  case 'row': return 'ph-arrow-right';
+                  case 'column': return 'ph-arrow-down';
+                  case 'flex-start': return 'ph-align-left-simple';
+                  case 'center': return 'ph-align-center-simple';
+                  case 'flex-end': return 'ph-align-right-simple';
+                  case 'space-between': return 'ph-arrows-out-line-horizontal';
+                  case 'left': return 'ph-text-align-left';
+                  case 'right': return 'ph-text-align-right';
+                  case 'justify': return 'ph-text-align-justify';
+                  default: return null;
+                }
+              }
+              const icon = getIcon(opt.value);
+
+              return (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    onChange(opt.value);
+                    onCommit?.(opt.value);
+                  }}
+                  title={opt.label}
+                  className={clsx(
+                    'p-1.5 rounded transition-all',
+                    isSelected
+                      ? 'bg-accent/10 text-accent border border-accent/20'
+                      : 'text-white/20 hover:text-white/60 hover:bg-white/5 border border-transparent'
+                  )}
+                >
+                  {icon ? <i className={clsx('ph ph-bold text-[12px]', icon)} /> : <span className="text-[9px] px-1">{opt.label}</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       );

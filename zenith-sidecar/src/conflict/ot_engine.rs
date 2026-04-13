@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::types::ZenithId;
+use crate::vfs::SelectionSignature;
 
 // ---------------------------------------------------------------------------
 // Layer node (simplified JSX tree for reordering)
@@ -187,7 +188,9 @@ pub enum MutationIntent {
     #[serde(rename_all = "camelCase")]
     TextChange {
         element: ZenithId,
+        #[serde(alias = "new_text")]
         new_text: String,
+        signature: Option<SelectionSignature>,
         timestamp: u64,
     },
 

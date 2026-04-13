@@ -237,10 +237,10 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
                  if (findInExpr(statement)) return true;
                }
             } else if (t.isReturnStatement(expr)) {
-               return findInExpr(expr.argument);
+               return expr.argument ? findInExpr(expr.argument) : false;
             } else if (t.isIfStatement(expr)) {
-               if (findInExpr(expr.consequent)) return true;
-               if (findInExpr(expr.alternate)) return true;
+               if (expr.consequent && findInExpr(expr.consequent)) return true;
+               if (expr.alternate && findInExpr(expr.alternate)) return true;
             }
             return false;
           };
@@ -410,52 +410,85 @@ function updateAttribute(node: t.JSXOpeningElement, name: string, value: string)
 // ---------------------------------------------------------------------------
 // Helper: Merge new styles into existing style attribute
 // ---------------------------------------------------------------------------
-function updateStyleAttribute(node: t.JSXOpeningElement, newStyles: Record<string, string>) {
+function updateStyleAttribute(node: t.JSXOpeningElement, newStyles: Record<string, string> | null | undefined) {
+  if (!newStyles || Object.keys(newStyles).length === 0) return;
   const idx = node.attributes.findIndex(
     (a) => t.isJSXAttribute(a) && t.isJSXIdentifier(a.name) && a.name.name === "style"
   );
 
-  // v11.7 Perfection: Move style to the end to override spreads
+  let existingProps: (t.ObjectProperty | t.SpreadElement | t.ObjectMethod)[] = [];
+
+  if (idx !== -1) {
+    const attr = node.attributes[idx] as t.JSXAttribute;
+    if (t.isJSXExpressionContainer(attr.value) && t.isObjectExpression(attr.value.expression)) {
+      // Merge: Keep existing properties unless they are being overwritten by newStyles
+      existingProps = attr.value.expression.properties.filter(p => {
+        if (t.isObjectProperty(p) && t.isIdentifier(p.key)) {
+          return !Object.keys(newStyles).includes(p.key.name);
+        }
+        return true;
+      });
+    }
+    node.attributes.splice(idx, 1);
+  }
+
+  // Add new/updated properties
+  const newProps = Object.entries(newStyles).map(([k, v]) => {
+    const isNumeric = /^-?\d+(\.\d+)?$/.test(v);
+    return t.objectProperty(
+      t.identifier(k),
+      isNumeric ? t.numericLiteral(parseFloat(v)) : t.stringLiteral(v)
+    );
+  });
+
   const finalAttr = t.jsxAttribute(
     t.jsxIdentifier("style"),
     t.jsxExpressionContainer(
-      t.objectExpression(
-        Object.entries(newStyles).map(([k, v]) => {
-           const isNumeric = /^-?\d+(\.\d+)?$/.test(v);
-           return t.objectProperty(t.identifier(k), isNumeric ? t.numericLiteral(parseFloat(v)) : t.stringLiteral(v));
-        })
-      )
+      t.objectExpression([...existingProps, ...newProps])
     )
   );
 
-  if (idx !== -1) {
-    node.attributes.splice(idx, 1);
-  }
   node.attributes.push(finalAttr);
 }
 
 // ---------------------------------------------------------------------------
 // Helper: Update text content (preserve sibling nodes)
 // ---------------------------------------------------------------------------
-function updateTextContent(jsxElement: t.JSXElement, textContent: string): void {
+function updateTextContent(jsxElement: t.JSXElement, textContent: string | null | undefined): void {
+  const tagName = (jsxElement.openingElement.name as any).name || 'unknown';
+  console.log(`[SURGICAL] updateTextContent targeted: <${tagName}> -> "${textContent}"`);
+  if (textContent === null || textContent === undefined) return;
   const parts = textContent.split("\n");
-  const textIdx = jsxElement.children.findIndex((c) => t.isJSXText(c));
 
-  if (parts.length === 1) {
-    if (textIdx !== -1) (jsxElement.children[textIdx] as t.JSXText).value = textContent;
-    else jsxElement.children.unshift(t.jsxText(textContent));
+  const nodes: t.JSXElement["children"] = [];
+  parts.forEach((part, i) => {
+    if (part) nodes.push(t.jsxText(part));
+    if (i < parts.length - 1) {
+      nodes.push(
+        t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier("br"), [], true), null, [], true)
+      );
+    }
+  });
+
+  // v13.0 Atomic Content Replacement
+  // We determine if we should "overwrite" the children or "patch" a specific text node.
+  // For visual design, if we are setting textContent, we usually want to replace everything 
+  // unless there are nested elements we want to keep.
+  const hasMultipleChildren = jsxElement.children.length > 1;
+  const hasElements = jsxElement.children.some(c => t.isJSXElement(c) || t.isJSXComponent(c as any));
+
+  if (!hasElements || !hasMultipleChildren) {
+    // Single child or purely text/fragments: Perform atomic replacement
+    jsxElement.children = nodes;
   } else {
-    const nodes: t.JSXElement["children"] = [];
-    parts.forEach((part, i) => {
-      if (part) nodes.push(t.jsxText(part));
-      if (i < parts.length - 1) {
-        nodes.push(
-          t.jsxElement(t.jsxOpeningElement(t.jsxIdentifier("br"), [], true), null, [], true)
-        );
-      }
-    });
-    if (textIdx !== -1) jsxElement.children.splice(textIdx, 1, ...nodes);
-    else jsxElement.children.unshift(...nodes);
+    // Hybrid content: Try to find the primary text node to replace
+    const textIdx = jsxElement.children.findIndex((c) => t.isJSXText(c));
+    if (textIdx !== -1) {
+      jsxElement.children.splice(textIdx, 1, ...nodes);
+    } else {
+      // Fallback: unshift the new text
+      jsxElement.children.unshift(...nodes);
+    }
   }
 }
 

@@ -9,6 +9,7 @@ interface SystemState {
   debugMode: boolean;
   isSpacePressed: boolean;
   sandboxPort: number;
+  previewMode: boolean;
   notifications: Array<{ id: string; type: 'info' | 'error' | 'success'; message: string }>;
   actions: {
     setConnectedServer: (url: string | null) => void;
@@ -19,6 +20,8 @@ interface SystemState {
     toggleDebugMode: () => void;
     setIsSpacePressed: (pressed: boolean) => void;
     setSandboxPort: (port: number) => void;
+    setPreviewMode: (enabled: boolean) => void;
+    togglePreview: () => void;
     addNotification: (type: 'info' | 'error' | 'success', message: string) => void;
     removeNotification: (id: string) => void;
   };
@@ -45,6 +48,9 @@ export const useSystemStore = create<SystemState>((set) => ({
     toggleDebugMode: () => set((state) => ({ debugMode: !state.debugMode })),
     setIsSpacePressed: (isSpacePressed) => set({ isSpacePressed }),
     setSandboxPort: (sandboxPort) => set({ sandboxPort }),
+    previewMode: false,
+    setPreviewMode: (previewMode: boolean) => set({ previewMode }),
+    togglePreview: () => set((state) => ({ previewMode: !state.previewMode })),
     addNotification: (type, message) => {
       const id = Math.random().toString(36).substring(7);
       set((state) => ({

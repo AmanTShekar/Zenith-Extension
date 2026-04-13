@@ -1,135 +1,95 @@
 import { useState } from "react";
+import "./App.css";
 function App() {
   const [count, setCount] = useState(0);
   return (
-    <div
-      style={{
-        padding: "40px",
-        fontFamily: "Inter, sans-serif",
-        minHeight: "100vh",
-        backgroundColor: "#0f172a",
-        color: "#f8fafc",
-      }}
-    >
-      <header
-        style={{
-          marginBottom: "40px",
-        }}
-      >
-        <h1
-          style={{
-            fontSize: "3rem",
-            fontWeight: 800,
-            marginBottom: "16px",
-          }}
-        >
-          <span
-            style={{
-              opacity: "1",
-              padding: "2rem",
-              width: "500px",
-              paddingBottom: "0px",
-              paddingLeft: "0px",
-              paddingTop: "0px",
-              paddingRight: "0px",
-              textTransform: "uppercase",
-            }}
-          >
-            hello
-          </span>{" "}
-          <span
-            style={{
-              color: "#1df8fc",
-              fontFamily: "",
-              opacity: "1",
-              textTransform: "uppercase",
-            }}
-          >
-            editor
-          </span>
-        </h1>
-
-        <p
-          style={{
-            fontSize: "1.25rem",
-            color: "#94a3b8",
-          }}
-        >
-          End-to-end mutation pipeline is active. Try resizing or changing styles.
-        </p>
+    <div className="demo-container">
+      <header className="hero">
+        {/* Placeholder text purged for minimalist studio session */}
       </header>
-
-      <main
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          gap: "24px",
-        }}
-      >
-        <section
-          style={{
-            padding: "24px",
-            borderRadius: "16px",
-            backgroundColor: "#1e293b",
-            border: "1px solid #334155",
-          }}
-        >
+      <main className="grid-layout">
+        <section className="surgical-card">
           <h2
             style={{
-              fontSize: "1.5rem",
-              marginBottom: "12px",
-              textTransform: "uppercase",
+              textTransform: "",
+              overflow: "visible",
+              fontFamily: "",
+              gap: "normal",
+              height: "32px",
+              left: "153px",
+              top: "217px",
+              width: "503px",
+              opacity: 1,
             }}
           >
-            hello
+            hello Status
           </h2>
           <div
+            className="status-pill"
             style={{
-              padding: "12px",
-              backgroundColor: "#10b981",
-              borderRadius: "8px",
-              textAlign: "center",
-              fontWeight: 600,
-              width: "572px",
+              opacity: 0.56,
             }}
           >
+            <div className="status-dot" />
             Operational
           </div>
+          <p
+            style={{
+              marginTop: "24px",
+              color: "rgba(255,255,255,0.4)",
+              fontSize: "0.9rem",
+              lineHeight: "1.6",
+            }}
+          >
+            The end-to-end mutation pipeline is active. Sidecar is monitoring AST changes in
+            real-time.
+          </p>
+          <nav></nav>
+          <nav></nav>
+          <main></main>
+          <footer></footer>
+          <aside></aside>
+          <nav></nav>
+          <nav></nav>
+          <nav></nav>
         </section>
 
-        <section
-          style={{
-            padding: "24px",
-            borderRadius: "16px",
-            backgroundColor: "#1e293b",
-            border: "1px solid #334155",
-          }}
-        >
-          <h2
+        <section className="surgical-card">
+          <h2>Interactive Test</h2>
+          <p
             style={{
-              fontSize: "1.5rem",
-              marginBottom: "12px",
+              marginBottom: "24px",
+              color: "rgba(255,255,255,0.4)",
+              fontSize: "0.9rem",
             }}
           >
-            Counter
-          </h2>
+            Test the reactive state synchronization between the Ghost-Runtime and VS Code.
+          </p>
           <button
             onClick={() => setCount(count + 1)}
+            className="btn-surgical"
             style={{
-              padding: "12px 24px",
-              backgroundColor: "#38bdf8",
-              color: "white",
-              border: "none",
-              borderRadius: "8px",
-              cursor: "pointer",
-              fontSize: "1rem",
-              fontWeight: "bold",
+              opacity: 0.29,
+              fontFamily: "Roboto, sans-serif",
             }}
           >
-            Count is {count}
+            Counter: {count}
           </button>
         </section>
       </main>
+      <footer
+        style={{
+          marginTop: "auto",
+          paddingTop: "80px",
+          opacity: 0.2,
+          fontSize: "10px",
+          fontWeight: 900,
+          letterSpacing: "0.3em",
+          textTransform: "uppercase",
+        }}
+      >
+        Zenith v11.7.6 // Ghost-Runtime v3.6
+      </footer>
     </div>
   );
 }

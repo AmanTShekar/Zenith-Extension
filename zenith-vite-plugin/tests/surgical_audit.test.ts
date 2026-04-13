@@ -122,6 +122,30 @@ describe("Surgical Engine — Property Reference Audit", () => {
       expect(result).toContain('New Title');
       expect(result).not.toContain('Old Title');
     });
+
+    it("patches text content inside a Fragment (Refcer Edge Case)", () => {
+      const source = `function App() { return <h1 data-zenith-id="src/App.tsx:h1.0"><>Old Text</></h1>; }`;
+      const instructions: PatchInstructions = {
+        zenithId: "src/App.tsx:h1.0",
+        textContent: "New Text"
+      };
+      const result = patchSourceFile(source, instructions);
+      expect(result).toContain('New Text');
+      expect(result).not.toContain('Old Text');
+    });
+
+    it("patches Batch className + inline styles (Audit Case)", () => {
+      const source = `function App() { return <div className="old" style={{ opacity: 0.5 }} data-zenith-id="src/App.tsx:div.0" />; }`;
+      const instructions: PatchInstructions = {
+        zenithId: "src/App.tsx:div.0",
+        className: "new-class",
+        styles: { opacity: "1", color: "red" }
+      };
+      const result = patchSourceFile(source, instructions);
+      expect(result).toContain('className="new-class"');
+      expect(result).toContain('opacity: 1');
+      expect(result).toContain('color: "red"');
+    });
   });
 
 });

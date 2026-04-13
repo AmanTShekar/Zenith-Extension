@@ -9,6 +9,7 @@ const RPC_TIMEOUTS: Record<string, number> = {
     'zenith.engine.commit':   30_000,   // 30s
     'zenith.engine.rollback':  5_000,   // 5s
     'zenith.engine.undo':      5_000,   // 5s
+    'vfs.harden_wal':         10_000,   // 10s
 };
 
 const DEFAULT_TIMEOUT = 10_000;

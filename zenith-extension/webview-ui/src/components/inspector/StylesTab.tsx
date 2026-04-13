@@ -5,33 +5,25 @@ import { StateBar } from './StateBar';
 export function StylesTab() {
   const { elementInfo, elementSignature } = useSelectionStore();
 
-  if (!elementInfo && !elementSignature) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full opacity-20 pointer-events-none grayscale translate-y-20">
-        <i className="ph ph-selection-all text-4xl mb-4" />
-        <span className="text-[11px] uppercase tracking-widest font-bold">Select an element</span>
-      </div>
-    );
-  }
+  if (!elementInfo && !elementSignature) return null;
 
   const tagName = elementInfo?.tagName || elementSignature?.tag || 'div';
   const displayId = elementInfo?.id || 'Universal';
 
   return (
-    <div className="animate-in fade-in slide-in-from-right-4 duration-300">
-      {/* Element header */}
-      <div className="px-5 pt-4 pb-3">
+    <div className="animate-in fade-in slide-in-from-right-2 duration-200">
+      {/* Element header — Minified */}
+      <div className="px-4 py-3 bg-white/[0.01] border-b border-white/[0.03]">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(0,240,255,0.5)]" />
-            <span className="text-white font-black text-[14px] tracking-tight">&lt;{tagName}&gt;</span>
+          <div className="flex items-center gap-2">
+            <div className={`w-1 h-1 rounded-full ${displayId === 'Universal' ? 'bg-white/20' : 'bg-accent'}`} />
+            <span className="text-white font-black text-[11px] uppercase tracking-wider">&lt;{tagName}&gt;</span>
           </div>
-          <span className="text-white/20 font-mono text-[9px] bg-white/5 px-2 py-1 rounded border border-white/5">#{displayId.substring(0, 8)}</span>
+          <span className="text-text-muted font-mono text-[8px] tracking-tighter">#{displayId.substring(0, 8)}</span>
         </div>
-        <div className="h-[1px] w-full bg-gradient-to-r from-accent/40 via-accent/5 to-transparent mt-4" />
       </div>
 
-      {/* Interaction State Selector — Onlook-style */}
+      {/* Interaction State Selector */}
       <StateBar />
 
       {/* Property Editor */}

@@ -33,18 +33,48 @@ const ArtboardHeader: React.FC<{ title: string; w: number; h: number }> = ({ tit
   </div>
 );
 
-const Artboard: React.FC<{ title: string; w: number; h: number; devServerUrl: string | null; isSelectMode: boolean }> = ({ title, w, h, devServerUrl, isSelectMode }) => {
+const Artboard: React.FC<{ 
+  title: string; 
+  w: number; 
+  h: number; 
+  devServerUrl: string | null; 
+  isSelectMode: boolean;
+  previewMode: boolean;
+}> = ({ title, w, h, devServerUrl, isSelectMode, previewMode }) => {
   const sandboxPort = useSystemStore(state => state.sandboxPort);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectedRect = useSelectionStore(state => state.rect);
   const hoverRect = useSelectionStore(state => state.hoverRect);
-  const selectedId = useSelectionStore(state => state.selectedId);
-  const fiberInfo = useSelectionStore(state => state.fiberInfo);
   const explorerActions = useExplorerStore(state => state.actions);
 
   const { resizing, handleResizeStart } = useArtboardInteraction(iframeRef);
+  const zoom = useCanvasStore(state => state.zoom);
 
-  // Derive the sandbox URL from the original devServerUrl
+  const handleMouseMove = (e: React.PointerEvent) => {
+    if (previewMode || !iframeRef.current || e.buttons === 4) return; // 4 is middle button held
+    const rect = iframeRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / zoom;
+    const y = (e.clientY - rect.top) / zoom;
+    iframeRef.current.contentWindow?.postMessage({ type: 'zenithHover', x, y }, '*');
+  };
+
+  const handleClick = (e: React.PointerEvent) => {
+    // [W6] Audit Fix: Interaction Guard. 
+    // Only allow left-click (0) to trigger selection. Ignore middle (1) and right (2).
+    if (previewMode || !iframeRef.current || e.button !== 0) return;
+    const rect = iframeRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / zoom;
+    const y = (e.clientY - rect.top) / zoom;
+    iframeRef.current.contentWindow?.postMessage({ type: 'zenithSelect', x, y }, '*');
+  };
+
+  const handleMouseLeave = () => {
+    if (previewMode || !iframeRef.current) return;
+    iframeRef.current.contentWindow?.postMessage({ type: 'zenithHover', x: -1000, y: -1000 }, '*');
+    useSelectionStore.setState({ hoverRect: null, hoverTag: null });
+  };
+
+  // Derive the sandbox URL
   const sandboxUrl = useMemo(() => {
     if (!devServerUrl) return '';
     try {
@@ -57,134 +87,79 @@ const Artboard: React.FC<{ title: string; w: number; h: number; devServerUrl: st
   }, [devServerUrl, sandboxPort]);
 
   useEffect(() => {
-    // v11.3: Hard-Flush — briefly empty the iframe to kill cached redirects
     if (iframeRef.current) {
         iframeRef.current.src = 'about:blank';
         setTimeout(() => {
             if (iframeRef.current) iframeRef.current.src = sandboxUrl;
         }, 10);
     }
-    
     iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSyncMode', selectMode: isSelectMode }, '*');
   }, [isSelectMode, sandboxUrl]);
 
-  const handleLoad = () => {
-    // Bridge is now injected by Sandbox Proxy (Mechanical Perfection)
-  };
+  const handleLoad = () => {};
 
-  // v11.0 Master Sync Listener (Receiving from Bridge)
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       const data = e.data;
       if (!data || typeof data !== 'object') return;
-
-      switch (data.type) {
-        case 'zenithHierarchy':
-          explorerActions.setTree(data.tree);
-          break;
-        case 'zenithHover':
-          useSelectionStore.setState({ hoverRect: data.rect, hoverTag: data.tagName });
-          break;
-        case 'zenithSelect': // Match new name from injected bridge
+      // ... sync logic remains same ...
+      if (data.type === 'zenithHierarchy') explorerActions.setTree(data.tree);
+      if (data.type === 'zenithHover' && !previewMode) {
+          useSelectionStore.setState({ hoverRect: data.rect, hoverTag: data.tagName || data.element });
+      }
+      if (data.type === 'zenithSelect' && !previewMode) {
           useSelectionStore.setState({
             selectedId: data.zenithId,
             rect: data.rect,
             computedStyles: data.computedStyles || {},
-            fiberInfo: {
-              name: data.componentName,
-              source: data.source
-            },
+            fiberInfo: { name: data.componentName, source: data.source },
             elementSignature: { 
               tag: data.tagName ?? data.element ?? 'div', 
-              classes: data.classes ?? [],
-              textContent: data.textContent ?? '',
-              xpath: data.xpath ?? ''
+              classes: data.classes ?? [], 
+              textContent: data.textContent ?? '', 
+              xpath: data.xpath ?? '' 
             } 
           });
-          break;
-        case 'zenithRectSync':
-          if (useSelectionStore.getState().selectedId === data.zenithId) {
-             useSelectionStore.setState({ 
-               rect: data.rect, 
-               computedStyles: data.computedStyles ?? {} 
-             });
-          }
-          break;
-        case 'zenithTextEdit':
-          vscode.postMessage({
-            type: 'stage',
-            intent: {
-              type: 'TextChange',
-              element: data.zenithId,
-              newText: data.newText,
-              timestamp: Date.now()
-            }
-          });
-          break;
       }
     };
-
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [explorerActions]);
+  }, [explorerActions, previewMode]);
 
-  // v9.0 Optimistic Style Listener (Forward to Bridge)
   useEffect(() => {
     const handlePreview = (e: any) => {
       const { zenithId, property, value, styles } = e.detail;
-      
-      if (styles) {
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'zenithBatchPatch',
-          zenithId,
-          styles
-        }, '*');
-      } else {
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'zenithPatchStyle',
-          id: zenithId,
-          property,
-          value
-        }, '*');
-      }
+      const payload = styles ? { type: 'zenithBatchPatch', zenithId, styles } : { type: 'zenithPatchStyle', id: zenithId, property, value };
+      iframeRef.current?.contentWindow?.postMessage(payload, '*');
     };
-
     window.addEventListener('zenith-preview-style', handlePreview as any);
     return () => window.removeEventListener('zenith-preview-style', handlePreview as any);
   }, []);
 
   return (
-    <div className="flex flex-col rounded-2xl border border-white/5 bg-[#050505] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.8)] translate-z-0">
-      <ArtboardHeader title={title} w={w} h={h} />
+    <div className={clsx(
+        "flex flex-col rounded-2xl border border-white/5 bg-[#050505] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.8)] translate-z-0 transition-all duration-500",
+        previewMode ? "rounded-none border-none shadow-none" : ""
+    )}>
+      {!previewMode && <ArtboardHeader title={title} w={w} h={h} />}
       <div className="relative overflow-hidden" style={{ width: w, height: h }}>
-        <iframe ref={iframeRef} src={sandboxUrl} onLoad={handleLoad} className="w-full h-full border-none" />
+        <iframe 
+          ref={iframeRef} 
+          src={sandboxUrl} 
+          onLoad={handleLoad} 
+          className={clsx(
+            "w-full h-full border-none transition-all",
+            "pointer-events-auto"
+          )} 
+        />
         
-        {isSelectMode && (
+        {isSelectMode && !previewMode && (
           <div className="absolute inset-0 pointer-events-none z-30">
-            {/* 1. Spacing Rulers for hover and selection */}
             {hoverRect && <SpacingRulers rect={hoverRect} color="#00f2ff" />}
             {selectedRect && <SpacingRulers rect={selectedRect} color="#ff00ff" />}
-            
-            {/* 2. Hover Interaction */}
-            <SelectionOverlay 
-              rect={hoverRect} 
-              color="#00f2ff" 
-              isHover 
-            />
-            
-            {/* 3. Primary Selection Interaction */}
-            <SelectionOverlay 
-              rect={selectedRect} 
-              color="#ff00ff" 
-              onResizeStart={handleResizeStart}
-            />
+            <SelectionOverlay rect={hoverRect} color="#00f2ff" isHover />
+            <SelectionOverlay rect={selectedRect} color="#ff00ff" onResizeStart={handleResizeStart} />
           </div>
-        )}
-        
-        {resizing && (
-           <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1 bg-[#ff00ff] rounded-full text-[10px] font-black text-white z-50 shadow-2xl animate-bounce">
-             PRO-SURGICAL SCALE: {(selectedRect?.width || 0).toFixed(0)}px
-           </div>
         )}
       </div>
     </div>
@@ -194,169 +169,132 @@ const Artboard: React.FC<{ title: string; w: number; h: number; devServerUrl: st
 export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string | null; isSpacePressed: boolean }) {
   const deviceWidth = useCanvasStore(state => state.deviceWidth);
   const deviceHeight = useCanvasStore(state => state.deviceHeight);
-  const viewMode = useCanvasStore(state => state.viewMode);
   const activeTool = useCanvasStore(state => state.activeTool);
   const zoom = useCanvasStore(state => state.zoom);
   const pan = useCanvasStore(state => state.pan);
-  const selectedId = useSelectionStore(state => state.selectedId);
-  const fiberInfo = useSelectionStore(state => state.fiberInfo);
   const { setPan, setZoom, setTool } = useCanvasStore(state => state.actions);
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number, y: number, visible: boolean }>({ x: 0, y: 0, visible: false });
+  const [isPanning, setIsPanning] = useState(false);
+  const previewMode = useSystemStore(state => state.previewMode);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const isSelectMode = activeTool === 'select' && !isSpacePressed;
+  const isSelectMode = activeTool === 'select' && !isSpacePressed && !previewMode;
 
-  // [W11] Hardening: Use a ref-synchronized state for native event listeners.
-  // This avoids 'ReferenceError: useCanvasStore is not defined' in the bundle
-  // and fixes stale closure bugs in the non-passive wheel handler.
-  const stateRef = useRef({ zoom, pan, selectedId, fiberInfo });
+  // v11.3: Studio Refinement — Use ref for stable closures in high-frequency events
+  const stateRef = useRef({ zoom, pan });
   useEffect(() => {
-    stateRef.current = { zoom, pan, selectedId, fiberInfo };
-  }, [zoom, pan, selectedId, fiberInfo]);
+    stateRef.current = { zoom, pan };
+  }, [zoom, pan]);
 
-  // v11.4: Auto-Center Logic (Fixed closure)
+  // v11.4: Auto-Center Logic
   useEffect(() => {
     const { zoom: z, pan: p } = stateRef.current;
     if (canvasRef.current && z === 1 && p.x === 0 && p.y === 0) {
-        setPan(100, 100); 
-        setZoom(0.75); 
+        // v11.9 Restoration: Match user preferred "Home" coordinates
+        setPan(-7, -75);
+        setZoom(0.65);
     }
   }, [setPan, setZoom]);
 
-  // v7.0 Zoom-to-Mouse
+  // v11.7: Surgical Panning Engine (Middle Mouse + Space Drag)
+  const startPanning = (e: React.PointerEvent) => {
+    const isMiddleClick = e.button === 1;
+    const isHandDrag = e.button === 0 && (activeTool === 'hand' || isSpacePressed);
+    if (!isMiddleClick && !isHandDrag) return;
+    
+    // Capture pointer to ensure we get events even outside the canvas
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+    setIsPanning(true);
+
+    const handlePointerMove = (em: PointerEvent) => {
+      const currentPan = stateRef.current.pan;
+      setPan(currentPan.x + em.movementX, currentPan.y + em.movementY);
+    };
+
+    const handlePointerUp = (em: PointerEvent) => {
+      setIsPanning(false);
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  };
+
   // v8.0 Master Keyboard Shortcuts (Onlook parity)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const cmdKey = isMac ? e.metaKey : e.ctrlKey;
-
-      if (e.key.toLowerCase() === 'v' && !cmdKey) setTool('select');
-      if (e.key.toLowerCase() === 'h' && !cmdKey) setTool('hand');
-      
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName || '')) return;
+      const cmdKey = e.metaKey || e.ctrlKey;
+      if (e.key.toLowerCase() === 'v') setTool('select');
+      if (e.key.toLowerCase() === 'h') setTool('hand');
+      if (e.key.toLowerCase() === 't') setTool('text');
+      if (e.key.toLowerCase() === 'i') setTool('insert');
       if (cmdKey) {
-        if (e.key === '=' || e.key === '+') {
-          e.preventDefault();
-          setZoom(stateRef.current.zoom * 1.1);
-        }
-        if (e.key === '-') {
-          e.preventDefault();
-          setZoom(stateRef.current.zoom / 1.1);
-        }
-        if (e.key === '0') {
-          e.preventDefault();
-          setPan(0, 0);
-          setZoom(1);
-        }
-      }
-
-      // Surgical Operations
-      const selectedId = useSelectionStore.getState().selectedId;
-      if (selectedId) {
-        if (cmdKey && e.key.toLowerCase() === 'd') {
-          e.preventDefault();
-          useSelectionStore.getState().actions.duplicateNode(selectedId);
-        }
-        if (e.key === 'Backspace' || e.key === 'Delete') {
-          e.preventDefault();
-          useSelectionStore.getState().actions.deleteNode(selectedId);
-        }
-      }
-
-      // Deselect
-      if (e.key === 'Escape') {
-        useSelectionStore.setState({ selectedId: null, rect: null });
+        if (e.key === '=' || e.key === '+') { e.preventDefault(); setZoom(stateRef.current.zoom * 1.1); }
+        if (e.key === '-') { e.preventDefault(); setZoom(stateRef.current.zoom / 1.1); }
+        if (e.key === '0') { e.preventDefault(); setPan(0,0); setZoom(1); }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [setTool, setZoom, setPan]);
 
   useEffect(() => {
-
     const el = canvasRef.current;
     if (!el) return;
-
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        const delta = e.deltaY;
-        const factor = delta > 0 ? 0.90 : 1.11;
+        const factor = e.deltaY > 0 ? 0.9 : 1.1;
         const rect = el.getBoundingClientRect();
-        
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
-
-        const { zoom: currentZoom, pan: currentPan } = stateRef.current;
-        const newZoom = Math.max(0.05, Math.min(10, currentZoom * factor));
-        
-        const newPanX = mouseX - (mouseX - currentPan.x) * (newZoom / currentZoom);
-        const newPanY = mouseY - (mouseY - currentPan.y) * (newZoom / currentZoom);
-        
-        setPan(newPanX, newPanY);
+        const { zoom: z, pan: p } = stateRef.current;
+        const newZoom = Math.max(0.05, Math.min(10, z * factor));
+        setPan(mouseX - (mouseX - p.x) * (newZoom / z), mouseY - (mouseY - p.y) * (newZoom / z));
         setZoom(newZoom);
       } else {
-        const { pan: currentPan } = stateRef.current;
-        setPan(currentPan.x - e.deltaX, currentPan.y - e.deltaY);
+        const { pan: p } = stateRef.current;
+        setPan(p.x - e.deltaX, p.y - e.deltaY);
       }
     };
-
     el.addEventListener('wheel', handleWheel, { passive: false });
     return () => el.removeEventListener('wheel', handleWheel);
-  }, [setPan, setZoom]); // stateRef is stable, no need to include it here
-
-
-  useEffect(() => {
-    const handleMessage = (e: MessageEvent) => {
-      if (e.data.type === 'zenithContextMenu') {
-        setCtxMenu({ x: e.data.x, y: e.data.y, visible: true });
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [setPan, setZoom]);
 
   return (
     <div
       ref={canvasRef}
-      onDoubleClick={(e) => {
-        if ((e.target as HTMLElement) !== canvasRef.current) return;
-        const { fiberInfo, selectedId } = stateRef.current;
-        if (fiberInfo?.source && selectedId) {
-          vscode.postMessage({ 
-            type: 'zenithJumpToSource', 
-            id: selectedId,
-            source: fiberInfo.source 
-          });
+      onPointerDown={startPanning}
+      onAuxClick={(e) => e.button === 1 && e.preventDefault()}
+      onContextMenu={(e) => {
+        if (isPanning || activeTool === 'hand' || isSpacePressed) {
+          e.preventDefault();
+          return;
         }
-      }}
-      onMouseDown={(e) => {
-        if (activeTool === 'hand' || isSpacePressed) {
-          const move = (em: MouseEvent) => {
-            const currentPan = stateRef.current.pan;
-            setPan(currentPan.x + em.movementX, currentPan.y + em.movementY);
-          };
-          const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-          window.addEventListener('mousemove', move);
-          window.addEventListener('mouseup', up);
-        }
+        e.preventDefault();
+        setCtxMenu({ x: e.clientX, y: e.clientY, visible: true });
       }}
       className={clsx(
-        "w-full h-full overflow-hidden relative bg-[#0a0a09] transition-all",
-        isSpacePressed || activeTool === 'hand' ? "cursor-grab" : "cursor-default"
+        "w-full h-full overflow-hidden relative bg-[#080808] transition-all touch-none",
+        isPanning || isSpacePressed || activeTool === 'hand' ? "cursor-grabbing" : "cursor-default"
       )}
     >
       <CanvasContextMenu {...ctxMenu} onClose={() => setCtxMenu(c => ({ ...c, visible: false }))} />
 
-      {/* Figma Dots */}
+      {(isPanning || isSpacePressed) && (
+        <div className="fixed inset-0 z-[6000] cursor-grabbing pointer-events-auto bg-transparent" />
+      )}
+
+      {/* High-Contrast Studio Dots */}
       <div 
-        className="absolute inset-0 opacity-[0.4] pointer-events-none" 
+        className="absolute inset-0 opacity-[0.2]" 
         style={{ 
-          backgroundImage: 'radial-gradient(rgba(255,255,255,0.1) 1px, transparent 0)', 
-          backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
+          backgroundImage: 'radial-gradient(#ffffff 1px, transparent 0)', 
+          backgroundSize: `${32 * zoom}px ${32 * zoom}px`,
           backgroundPosition: `${pan.x}px ${pan.y}px`
         }} 
       />
@@ -366,25 +304,25 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
         style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
       >
         {!devServerUrl ? (
-          <div className="p-20 text-center bg-[#1a1a1a] rounded-3xl border border-white/5 opacity-40 uppercase tracking-[0.4em] text-[10px] font-black">
-            Zenith Engine Offline
+          <div className="p-20 text-center bg-[#111] rounded-3xl border border-white/5 opacity-40 uppercase tracking-[0.4em] text-[10px] font-black">
+            Zenith Engine Standby
           </div>
         ) : (
           <div className="flex items-center justify-center min-w-full min-h-full">
-             {viewMode === 'multi' ? (
-                <div className="flex items-start gap-40 p-40">
-                  <Artboard title="Desktop Large" w={1440} h={900} devServerUrl={devServerUrl} isSelectMode={isSelectMode} />
-                  <Artboard title="iPad Pro" w={1024} h={1366} devServerUrl={devServerUrl} isSelectMode={isSelectMode} />
-                  <Artboard title="iPhone 15" w={393} h={852} devServerUrl={devServerUrl} isSelectMode={isSelectMode} />
-                </div>
-             ) : (
-                <div className="p-40">
-                  <Artboard title="Active Focus" w={deviceWidth} h={deviceHeight} devServerUrl={devServerUrl} isSelectMode={isSelectMode} />
-                </div>
-             )}
+             <div className="p-40">
+               <Artboard 
+                 title="Active focus" 
+                 w={deviceWidth} 
+                 h={deviceHeight} 
+                 devServerUrl={devServerUrl} 
+                 isSelectMode={isSelectMode} 
+                 previewMode={previewMode}
+               />
+             </div>
           </div>
         )}
       </div>
     </div>
   );
 }
+

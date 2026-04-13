@@ -5,15 +5,16 @@ import { vscode } from '../bridge';
 interface ContextMenuProps {
   x: number;
   y: number;
+  visible: boolean;
   onClose: () => void;
 }
 
-export function CanvasContextMenu({ x, y, onClose }: ContextMenuProps) {
+export function CanvasContextMenu({ x, y, visible, onClose }: ContextMenuProps) {
   const selectedId = useSelectionStore(state => state.selectedId);
   const elementSignature = useSelectionStore(state => state.elementSignature);
   const elementInfo = useSelectionStore(state => state.elementInfo);
   
-  if (!selectedId && !elementSignature) return null;
+  if (!visible || (!selectedId && !elementSignature)) return null;
 
   const handleAction = (type: string) => {
     vscode.postMessage({
