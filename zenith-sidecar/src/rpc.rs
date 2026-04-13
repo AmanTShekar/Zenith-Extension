@@ -62,6 +62,10 @@ pub trait ZenithApi {
     #[method(name = "zenith.engine.stage")]
     async fn stage(&self, tx_id: String, intent: MutationIntent) -> RpcResult<StageResult>;
 
+    #[method(name = "zenith.engine.stage_batch")]
+    async fn stage_batch(&self, tx_id: String, zenith_id: ZenithId, styles: HashMap<String, String>) -> RpcResult<StageResult>;
+
+
     #[method(name = "vfs.stage_universal")]
     async fn stage_universal(
         &self,
@@ -211,6 +215,33 @@ impl ZenithApiServer for ZenithRpc {
         self.state.rpc_history.insert(tx_id, response.clone());
         Ok(response)
     }
+
+    async fn stage_batch(&self, tx_id: String, zenith_id: ZenithId, styles: HashMap<String, String>) -> RpcResult<StageResult> {
+        tracing::info!(tx_id, %zenith_id, ?styles, "[RPC] zenith.engine.stage_batch reached");
+        if let Some(prev) = self.state.rpc_history.get(&tx_id) {
+            return Ok(prev.clone());
+        }
+        let tx = uuid::Uuid::parse_str(&tx_id).map_err(|e| internal_error(anyhow!(e)))?;
+
+        let intent = MutationIntent::BatchPropertyChange {
+            element: zenith_id,
+            styles,
+            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        };
+
+        let mut vfs = self.state.vfs.write().await;
+        let project_root = self.state.project_root.clone();
+        let (result, new_id) = vfs.stage_mutation(tx, intent, &project_root).map_err(internal_error)?;
+        
+        let response = match result {
+            TransformResult::NoConflict => StageResult::Success { new_zenith_id: new_id },
+            TransformResult::HumanReview { .. } => StageResult::Conflict(result),
+            TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id },
+        };
+        self.state.rpc_history.insert(tx_id, response.clone());
+        Ok(response)
+    }
+
 
     async fn stage_universal(
         &self,

@@ -87,8 +87,9 @@ fn parse_args() -> Args {
     let mut global_index_path: Option<PathBuf> = None;
     let mut log_level = "info".to_string();
     let mut framework: Option<String> = None;
-    let mut target_port = 5173; // Default to Vite standard
-    let mut sandbox_port = 3005; // Default sandbox port
+    let mut target_port = 3009; // Default to Vite standard
+    let mut sandbox_port = 3111; // Default sandbox port (v1.0 Audit standard)
+
 
     while let Some(flag) = args_iter.next() {
         match flag.as_str() {
@@ -411,7 +412,21 @@ async fn main() {
  
     // v11.5 Lifecycle Hardening: The Sandbox Proxy is now managed EXCLUSIVELY via 
     // JSON-RPC. This prevents the "two proxies per session" bug (3006/3007 drift).
-    info!("[SIDECAR] Phase 4/6: Sandbox proxy manager ready (awaiting RPC latch)");
+    info!("[SIDECAR] Phase 4/6: Sandbox proxy manager ready");
+    if args.target_port != 0 {
+        let target_port = args.target_port;
+        let sb_port = args.sandbox_port;
+
+        tokio::spawn(async move {
+            let proxy = zenith_sidecar::proxy::sandbox::SandboxProxy::new(target_port);
+            if let Err(e) = proxy.start(sb_port).await {
+                error!("[SIDECAR] Sandbox Proxy failed to start: {}", e);
+            }
+        });
+    }
+
+
+
 
     // JSON-RPC WebSocket server (Thread 2)
 

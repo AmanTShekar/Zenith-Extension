@@ -138,18 +138,23 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
         }
 
         // 1. Try Virtual Cache (Ghost Proxy)
+        let baseCode = code;
         const virtualContent = await fetchFromGhostProxy(relativePath, sidecarPipe);
-        if (virtualContent) return { code: virtualContent, map: null };
+        if (virtualContent) {
+           // v5.1: Critical Fix - Virtual content MUST still be injected with IDs
+           // before being served to Vite, otherwise selection tracking is lost.
+           baseCode = virtualContent;
+        }
 
         // [O2] Audit Fix: Skip re-injection if file content hasn't changed since last transform
-        const contentHash = fnv1a32(code);
+        const contentHash = fnv1a32(baseCode);
         const cached = _transformCache.get(id);
-        if (cached && cached.hash === contentHash) {
+        if (cached && cached.hash === contentHash && !virtualContent) {
           return { code: cached.result.code, map: null };
         }
 
-        // 2. Local Injector
-        const result = injectGhostIds(code, relativePath, attrName);
+        // 2. Local Injector (Pass either real disk code or virtual code)
+        const result = injectGhostIds(baseCode, relativePath, attrName);
         _transformCache.set(id, { hash: contentHash, result });
         
         // 3. Sync to Sidecar Registry (Real-time)

@@ -24,7 +24,6 @@ const App: React.FC = () => {
 
   // Store Selectors
   const isSpacePressed = useSystemStore(state => state.isSpacePressed);
-  const setIsSpacePressed = useSystemStore(state => state.setIsSpacePressed);
   const debugMode = useSystemStore(state => state.debugMode);
   const projectName = useSystemStore(state => state.projectName);
   const connectedServer = useSystemStore(state => state.connectedServer);
@@ -41,12 +40,14 @@ const App: React.FC = () => {
   // Navigation: Jump to canvas ONLY if on the home screen and a URL is detected
   useEffect(() => {
     if (devServerUrl && view === 'home') {
-       setView('canvas');
-       // Force origin centering on entry
-       canvasActions.setPan(0, 0);
-       canvasActions.setZoom(1);
+       // v11.3: Defer navigation to broad-cast phase to avoid cascading render task
+       Promise.resolve().then(() => {
+         setView('canvas');
+         canvasActions.setPan(0, 0);
+         canvasActions.setZoom(1);
+       });
     }
-  }, [devServerUrl]);
+  }, [devServerUrl, view, canvasActions]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -162,7 +163,7 @@ const App: React.FC = () => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat) setIsSpacePressed(true);
+      if (e.code === 'Space' && !e.repeat) systemActions.setIsSpacePressed(true);
       
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const cmd = isMac ? e.metaKey : e.ctrlKey;
@@ -179,7 +180,7 @@ const App: React.FC = () => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') setIsSpacePressed(false);
+      if (e.code === 'Space') systemActions.setIsSpacePressed(false);
     };
 
     window.addEventListener('message', handleMessage);
@@ -200,6 +201,7 @@ const App: React.FC = () => {
       <Toolbar 
         projectName={projectName}
         surgicalMode={surgicalMode}
+        houdiniActive={false}
         connectedServer={connectedServer}
         onToggleSurgical={() => vscode.postMessage({ type: 'toggleSurgical' })}
         onHome={() => setView('home')}

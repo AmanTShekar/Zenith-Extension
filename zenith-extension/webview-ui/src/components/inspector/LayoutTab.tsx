@@ -3,11 +3,15 @@ import { ScrubInput } from '../ScrubInput';
 
 export function LayoutTab() {
   const { computedStyles } = useSelectionStore();
-  const { patchStyle } = useSelectionStore(state => state.actions);
+  const { previewStyle, patchStyle } = useSelectionStore(state => state.actions);
 
   const parse = (val: string) => parseFloat(val) || 0;
 
-  const handleChange = (property: string, value: number) => {
+  const handlePreview = (property: string, value: number) => {
+    previewStyle(property, `${value}px`);
+  };
+
+  const handleCommit = (property: string, value: number) => {
     patchStyle(property, `${value}px`);
   };
 
@@ -22,28 +26,32 @@ export function LayoutTab() {
             <ScrubInput 
               label="M" 
               value={parse(computedStyles.marginTop)} 
-              onChange={(v) => handleChange('marginTop', v)} 
+              onChange={(v) => handlePreview('marginTop', v)} 
+              onCommit={(v) => handleCommit('marginTop', v)}
             />
          </div>
          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 scale-75">
             <ScrubInput 
               label="M" 
               value={parse(computedStyles.marginBottom)} 
-              onChange={(v) => handleChange('marginBottom', v)} 
+              onChange={(v) => handlePreview('marginBottom', v)} 
+              onCommit={(v) => handleCommit('marginBottom', v)}
             />
          </div>
          <div className="absolute left-2 top-1/2 -translate-y-1/2 -rotate-90 scale-75">
             <ScrubInput 
               label="M" 
               value={parse(computedStyles.marginLeft)} 
-              onChange={(v) => handleChange('marginLeft', v)} 
+              onChange={(v) => handlePreview('marginLeft', v)} 
+              onCommit={(v) => handleCommit('marginLeft', v)}
             />
          </div>
          <div className="absolute right-2 top-1/2 -translate-y-1/2 rotate-90 scale-75">
             <ScrubInput 
               label="M" 
               value={parse(computedStyles.marginRight)} 
-              onChange={(v) => handleChange('marginRight', v)} 
+              onChange={(v) => handlePreview('marginRight', v)} 
+              onCommit={(v) => handleCommit('marginRight', v)}
             />
          </div>
 
@@ -53,7 +61,8 @@ export function LayoutTab() {
                <ScrubInput 
                   label="B" 
                   value={parse(computedStyles.borderTopWidth)} 
-                  onChange={(v) => handleChange('borderTopWidth', v)} 
+                  onChange={(v) => handlePreview('borderTopWidth', v)} 
+                  onCommit={(v) => handleCommit('borderTopWidth', v)}
                />
             </div>
             
@@ -63,28 +72,32 @@ export function LayoutTab() {
                    <ScrubInput 
                       label="P" 
                       value={parse(computedStyles.paddingTop)} 
-                      onChange={(v) => handleChange('paddingTop', v)} 
+                      onChange={(v) => handlePreview('paddingTop', v)} 
+                      onCommit={(v) => handleCommit('paddingTop', v)}
                    />
                 </div>
                 <div className="absolute bottom-1 left-1/2 -translate-x-1/2 scale-[0.6]">
                    <ScrubInput 
                       label="P" 
                       value={parse(computedStyles.paddingBottom)} 
-                      onChange={(v) => handleChange('paddingBottom', v)} 
+                      onChange={(v) => handlePreview('paddingBottom', v)} 
+                      onCommit={(v) => handleCommit('paddingBottom', v)}
                    />
                 </div>
                 <div className="absolute left-1 top-1/2 -translate-y-1/2 -rotate-90 scale-[0.6]">
                    <ScrubInput 
                       label="P" 
                       value={parse(computedStyles.paddingLeft)} 
-                      onChange={(v) => handleChange('paddingLeft', v)} 
+                      onChange={(v) => handlePreview('paddingLeft', v)} 
+                      onCommit={(v) => handleCommit('paddingLeft', v)}
                    />
                 </div>
                 <div className="absolute right-1 top-1/2 -translate-y-1/2 rotate-90 scale-[0.6]">
                    <ScrubInput 
                       label="P" 
                       value={parse(computedStyles.paddingRight)} 
-                      onChange={(v) => handleChange('paddingRight', v)} 
+                      onChange={(v) => handlePreview('paddingRight', v)} 
+                      onCommit={(v) => handleCommit('paddingRight', v)}
                    />
                 </div>
 

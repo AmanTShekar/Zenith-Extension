@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zenith Auto-Test Harness</title>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; height: 100vh; font-family: sans-serif; background: #121212; color: #eee; }
+        #header { padding: 10px 20px; background: #1e1e1e; border-bottom: 2px solid #333; display: flex; justify-content: space-between; align-items: center; }
+        #main { flex: 1; display: flex; }
+        #sidebar { width: 350px; padding: 20px; border-right: 2px solid #333; overflow-y: auto; }
+        #view { flex: 1; background: #000; position: relative; }
+        iframe { width: 100%; height: 100%; border: none; }
+        .test-card { background: #252525; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #444; }
+        .pass { border-left-color: #10b981 !important; color: #10b981; }
+        .fail { border-left-color: #ef4444 !important; color: #ef4444; }
+        .running { border-left-color: #3b82f6 !important; color: #3b82f6; }
+        pre { background: #000; padding: 10px; font-size: 11px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h2 style="margin:0; color: #0ea5e9;">Zenith Surgical Engine Audit v2.0</h2>
+        <div id="connection">Sidecar: Connecting...</div>
+    </div>
+    <div id="main">
+        <div id="sidebar">
+            <div id="test-1" class="test-card">
+                <h3>Test 1: Ghost-ID Registry</h3>
+                <p id="t1-status">Waiting for select...</p>
+            </div>
+            <div id="test-2" class="test-card">
+                <h3>Test 2: Unit Injection (px)</h3>
+                <p id="t2-status">Pending...</p>
+                <button onclick="runTest2()" style="padding: 5px 10px; cursor: pointer;">Run Test 2</button>
+            </div>
+            <div id="test-3" class="test-card">
+                <h3>Test 3: Bridge Loopback</h3>
+                <p id="t3-status">Pending style patch...</p>
+            </div>
+        </div>
+        <div id="view">
+            <iframe id="target" src="/"></iframe>
+        </div>
+    </div>
+
+    <script>
+        const frame = document.getElementById('target');
+        const conn = document.getElementById('connection');
+        const t1 = document.getElementById('t1-status');
+        const t2 = document.getElementById('t2-status');
+        const t3 = document.getElementById('t3-status');
+        const t2Card = document.getElementById('test-2');
+
+        window.addEventListener('message', (e) => {
+            if (!e.data || !e.data.type) return;
+
+            if (e.data.type === 'zenithPresence') {
+                conn.innerText = 'Sidecar: Active (Bridge v5.1 detected)';
+                conn.style.color = '#10b981';
+            }
+
+            if (e.data.type === 'zenithSelect') {
+                document.getElementById('test-1').classList.add('pass');
+                t1.innerHTML = `<strong>PASS:</strong> ID ${e.data.zenithId} detected.`;
+            }
+
+            if (e.data.type === 'zenithRectSync') {
+                t3.innerText = 'Bridge Loopback Active: ' + Math.round(e.data.rect.width) + 'px';
+            }
+        });
+
+        async function runTest2() {
+            t2.innerText = "Running logic injection...";
+            t2Card.className = "test-card running";
+            
+            // 1. Identify H1 (Surgical path known)
+            const zid = "src/App.tsx:div.0:header.0:h1.0";
+            
+            // 2. Send patch without units
+            frame.contentWindow.postMessage({
+                type: 'zenithPatchStyle',
+                id: zid,
+                property: 'width',
+                value: '456' // Raw number string, no 'px'
+            }, '*');
+
+            // 3. Wait for CSSOM to update
+            setTimeout(() => {
+                try {
+                    const h1 = frame.contentWindow.document.querySelector('[data-zenith-id*="h1"]');
+                    if (!h1) {
+                        t2.innerText = "FAIL: H1 not found in iframe content.";
+                        t2Card.className = "test-card fail";
+                        return;
+                    }
+                    
+                    const computedWidth = frame.contentWindow.getComputedStyle(h1).width;
+                    if (computedWidth === '456px') {
+                        t2.innerText = `PASS: Style width is '${computedWidth}'. Unit injected successfully.`;
+                        t2Card.className = "test-card pass";
+                    } else {
+                        t2.innerText = `FAIL: Computed width is '${computedWidth}'. Expected '456px'.`;
+                        t2Card.className = "test-card fail";
+                    }
+                } catch(err) {
+                    t2.innerText = "FAIL: Cross-origin restriction. Run this on 127.0.0.1:3111 to permit access.";
+                    t2Card.className = "test-card fail";
+                    console.error(err);
+                }
+            }, 800);
+        }
+    </script>
+</body>
+</html>

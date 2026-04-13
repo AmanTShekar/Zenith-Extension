@@ -399,15 +399,15 @@ mod tests {
     #[test]
     fn test_fnv1a_deterministic() {
         let id = "src/components/Button.tsx:14:6";
-        let h1 = fnv1a_hash(id);
-        let h2 = fnv1a_hash(id);
+        let h1 = fnv1a_hash_u64(id);
+        let h2 = fnv1a_hash_u64(id);
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn test_fnv1a_different_ids() {
-        let h1 = fnv1a_hash("src/Button.tsx:14:6");
-        let h2 = fnv1a_hash("src/Button.tsx:15:6");
+        let h1 = fnv1a_hash_u64("src/Button.tsx:14:6");
+        let h2 = fnv1a_hash_u64("src/Button.tsx:15:6");
         assert_ne!(h1, h2);
     }
 

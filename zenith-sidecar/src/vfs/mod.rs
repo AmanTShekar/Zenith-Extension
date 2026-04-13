@@ -458,6 +458,7 @@ impl VirtualFileSystem {
         // ── Resolve element ID + file from any intent variant ──────────────
         let element_id = match intent {
             MutationIntent::PropertyChange { element, .. } => element,
+            MutationIntent::BatchPropertyChange { element, .. } => element,
             MutationIntent::TextChange { element, .. } => element,
             MutationIntent::DeleteNode { node, .. } => node,
             MutationIntent::InsertNode { parent, .. } => parent,
@@ -475,9 +476,13 @@ impl VirtualFileSystem {
                 .ok_or_else(|| anyhow!("Ghost ID {} not found in registry", element_id))?;
             (entry.file.clone(), entry.line as usize, entry.column as usize)
         } else {
-            let parts: Vec<&str> = element_id.rsplitn(3, ':').collect();
-            if parts.len() < 3 { bail!("Invalid Zenith ID: {}", element_id); }
-            (parts[2].trim_start_matches('/').replace("\\", "/"), parts[1].parse().unwrap_or(1), parts[0].parse().unwrap_or(0))
+            // v9.7 Mechanical Perfection: Handle variable colon counts (File:Path.idx:...)
+            // We split from the left to extract the filename correctly.
+            let parts: Vec<&str> = element_id.splitn(2, ':').collect();
+            if parts.len() < 2 { bail!("Invalid Zenith ID: {}", element_id); }
+            
+            // parts[0] is the filename, parts[1] is the selector path
+            (parts[0].trim_start_matches('/').replace("\\", "/"), 1, 0)
         };
 
         let path = PathBuf::from(&filename);
@@ -505,21 +510,70 @@ impl VirtualFileSystem {
                 "textTransform"|"cursor"|"visibility"|"pointerEvents")
         };
 
+        let is_dimensional = |p: &str| -> bool {
+            matches!(p, "width"|"height"|"minWidth"|"maxWidth"|"minHeight"|"maxHeight"|
+                "top"|"right"|"bottom"|"left"|
+                "padding"|"paddingTop"|"paddingRight"|"paddingBottom"|"paddingLeft"|
+                "margin"|"marginTop"|"marginRight"|"marginBottom"|"marginLeft"|
+                "gap"|"borderRadius"|"borderWidth"|"fontSize"|"letterSpacing")
+        };
+
+        let normalize = |p: &str, v: String| -> String {
+            if is_dimensional(p) {
+                // If it's a number string (can include decimal or minus), append 'px'
+                if v.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') && !v.is_empty() {
+                    format!("{}px", v)
+                } else {
+                    v
+                }
+            } else {
+                v
+            }
+        };
+
         let mut predicted_new_id: Option<ZenithId> = None;
 
         let instructions = match intent {
             MutationIntent::PropertyChange { property, value, .. } => {
+                let final_val = if is_css(property) {
+                    normalize(property, value.clone())
+                } else {
+                    value.clone()
+                };
+
                 if is_css(property) {
                     serde_json::json!({
                         "zenithId": element_id,
-                        "styles": { property: value }
+                        "styles": { property: final_val }
                     })
                 } else if property == "className" {
-                    serde_json::json!({ "zenithId": element_id, "className": value })
+                    serde_json::json!({ "zenithId": element_id, "className": final_val })
                 } else {
-                    serde_json::json!({ "zenithId": element_id, "styles": { property: value } })
+                    serde_json::json!({ "zenithId": element_id, "styles": { property: final_val } })
                 }
             }
+            
+            MutationIntent::BatchPropertyChange { styles, .. } => {
+                let mut normalized_styles = HashMap::new();
+                let mut text_content = None;
+
+                for (p, v) in styles {
+                    if p == "textContent" {
+                        text_content = Some(v.clone());
+                    } else if is_css(p) {
+                        normalized_styles.insert(p.clone(), normalize(p, v.clone()));
+                    } else {
+                        normalized_styles.insert(p.clone(), v.clone());
+                    }
+                }
+
+                serde_json::json!({
+                    "zenithId": element_id,
+                    "styles": normalized_styles,
+                    "textContent": text_content
+                })
+            }
+
 
             MutationIntent::TextChange { new_text, .. } => {
                 serde_json::json!({ "zenithId": element_id, "textContent": new_text })
@@ -597,10 +651,12 @@ impl VirtualFileSystem {
         // 🚀 Invoke Babel AST Surgical Engine
         let patched_content = self.call_surgical_node(&base_content, &instructions)?;
 
+        let last_line_len = base_content.lines().last().map(|l| l.len()).unwrap_or(0);
+
         Ok((path, TextEdit {
             start_line: 1,
             start_col: 0,
-            end_line: (base_content.lines().count() + 1) as u32,
+            end_line: 999_999, // Practically infinity for file replacement
             end_col: 0,
             old_text: base_content,
             new_text: patched_content,
@@ -614,27 +670,30 @@ impl VirtualFileSystem {
         use std::process::{Command, Stdio};
         use std::io::Write;
 
-        // v4.6: Default to pre-compiled dist/bin/surgical-cli.js
-        // Run `npm run build:bin` in zenith-vite-plugin to compile.
-        // Override with ZENITH_SURGICAL_BIN env var for development.
-        let surgical_bin = std::env::var("ZENITH_SURGICAL_BIN")
-            .unwrap_or_else(|_| "node c:/Users/Asus/Desktop/ve/zenith-vite-plugin/dist/bin/surgical-cli.js".to_string());
+        let envelope = serde_json::json!({
+            "source": source,
+            "instructions": instructions
+        });
 
-        let parts: Vec<&str> = surgical_bin.split_whitespace().collect();
-        if parts.is_empty() { bail!("ZENITH_SURGICAL_BIN is empty"); }
-
-        let mut child = Command::new(parts[0])
-            .args(&parts[1..])
-            .arg(serde_json::to_string(instructions)?)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("Failed to spawn Zenith Surgical Node Engine. Ensure `npm run build:bin` has been run in zenith-vite-plugin.")?;
+        let mut child = if cfg!(windows) {
+            Command::new("cmd")
+                .args(&["/c", "node", "C:\\Users\\Asus\\Desktop\\ve\\zenith-vite-plugin\\dist\\bin\\surgical-cli.js"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?
+        } else {
+            Command::new("node")
+                .arg("c:/Users/Asus/Desktop/ve/zenith-vite-plugin/dist/bin/surgical-cli.js")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?
+        };
 
         let mut stdin = child.stdin.take().context("Failed to open stdin to Surgical Engine")?;
-        stdin.write_all(source.as_bytes())?;
-        drop(stdin); // Flush and close
+        stdin.write_all(envelope.to_string().as_bytes())?;
+        drop(stdin); // Flush and signal end of envelope
 
         let output = child.wait_with_output()?;
 
@@ -1235,9 +1294,15 @@ fn apply_edits(source: &str, edits: &[TextEdit]) -> Result<String> {
         } else {
             // Multi-line edit
             let first_line = &lines[sl];
-            let last_line = &lines[el.min(lines.len() - 1)];
-            let before = &first_line[..start_col.min(first_line.len())];
-            let after = &last_line[end_col.min(last_line.len())..];
+            let before = &first_line[..edit.start_col.min(first_line.len() as u32) as usize];
+            
+            let after = if el < lines.len() {
+                let last_line = &lines[el];
+                &last_line[edit.end_col.min(last_line.len() as u32) as usize..]
+            } else {
+                ""
+            };
+            
             let replacement = format!("{before}{}{after}", edit.new_text);
 
             // Remove the old lines and insert the replacement

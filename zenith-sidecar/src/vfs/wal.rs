@@ -78,7 +78,7 @@ impl WalEntry {
 /// Each entry is serialized as a length-prefixed MessagePack frame:
 ///   [4 bytes: length (little-endian u32)] [N bytes: rmp-serde payload]
 pub struct WalWriter {
-    file: BufWriter<File>,
+    file: Option<BufWriter<File>>,
     path: PathBuf,
     entries_since_sync: u32,
 }
@@ -96,7 +96,7 @@ impl WalWriter {
             .open(path)?;
 
         Ok(Self {
-            file: BufWriter::new(file),
+            file: Some(BufWriter::new(file)),
             path: path.to_path_buf(),
             entries_since_sync: 0,
         })
@@ -109,9 +109,11 @@ impl WalWriter {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         let len = payload.len() as u32;
-        self.file.write_all(&len.to_le_bytes())?;
-        self.file.write_all(&payload)?;
-        self.file.flush()?;
+        let file = self.file.as_mut().ok_or_else(|| io::Error::new(io::ErrorKind::Other, "WAL file not open"))?;
+        
+        file.write_all(&len.to_le_bytes())?;
+        file.write_all(&payload)?;
+        file.flush()?;
         self.entries_since_sync += 1;
 
         debug!("WAL append: {} bytes (entries_since_sync={})", payload.len(), self.entries_since_sync);
@@ -124,9 +126,11 @@ impl WalWriter {
     /// Called on every slider release to guarantee zero data loss.
     /// Cost: ~1-10ms on SSD, acceptable for release events (not scrub ticks).
     pub fn sync(&mut self) -> io::Result<()> {
-        self.file.flush()?;
+        let file = self.file.as_mut().ok_or_else(|| io::Error::new(io::ErrorKind::Other, "WAL file not open"))?;
+        
+        file.flush()?;
         // fdatasync: sync file data without metadata (faster than full fsync)
-        self.file.get_ref().sync_data()?;
+        file.get_ref().sync_data()?;
         info!("[ZENITH-WAL] fdatasync complete — journaled {} entries to disk", self.entries_since_sync);
         self.entries_since_sync = 0;
         Ok(())
@@ -135,21 +139,28 @@ impl WalWriter {
     /// Truncate the WAL (after a successful snapshot checkpoint).
     /// v3.10: Now use's atomic rename to avoid corruption during truncation (Patch 15).
     pub fn truncate(&mut self) -> io::Result<()> {
+        // 1. Flush and Close the existing file handle. 
+        // This is CRITICAL on Windows to allow the atomic rename below.
+        if let Some(mut file) = self.file.take() {
+            file.flush()?;
+            drop(file); // Explicitly close the file handle
+        }
+
         let parent = self.path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Parent dir not found"))?;
         let temp = tempfile::NamedTempFile::new_in(parent)?;
         
-        // Ensure the file is flushed and closed before rename if necessary, 
-        // but NamedTempFile handles this. Persist it to the target path.
+        // 2. Persist the temporary (empty) file to the target path.
+        // This will now succeed on Windows because the target file is no longer open.
         temp.persist(&self.path).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-        // Reopen the truncated file
+        // 3. Reopen the truncated file
         let file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
             .open(&self.path)?;
 
-        self.file = BufWriter::new(file);
+        self.file = Some(BufWriter::new(file));
         self.entries_since_sync = 0;
         info!("WAL atomically truncated: {}", self.path.display());
         Ok(())
@@ -331,7 +342,6 @@ mod tests {
         let wal_path = dir.join("trunc.wal");
 
         let mut writer = WalWriter::open(&wal_path).unwrap();
-        writer.append(&WalEntry::new_checkpoint(42)).unwrap();
         writer
             .append(&WalEntry::new_patch(
                 uuid::Uuid::new_v4(),

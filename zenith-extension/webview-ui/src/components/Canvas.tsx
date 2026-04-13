@@ -1,25 +1,20 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   useCanvasStore, 
   useSystemStore, 
   useSelectionStore, 
-  useExplorerStore, 
-  normalizeStyles 
+  useExplorerStore 
 } from '../stores';
 import { clsx } from 'clsx';
-import { motion, AnimatePresence } from 'framer-motion';
-import { vscode } from '../bridge';
-import { 
-  AlertCircle, ChevronRight, Layout, Layers, Smartphone, Tablet, Monitor, 
-  Maximize2, AlertTriangle, Info, Copy, Trash2, Box, Code2, MoreVertical
-} from 'lucide-react';
+import { Layout } from 'lucide-react';
 
 import { useArtboardInteraction } from '../hooks/useArtboardInteraction';
 import { SelectionOverlay } from './SelectionOverlay';
 import { SpacingRulers } from './SpacingRulers';
 import { CanvasContextMenu } from './CanvasContextMenu';
+import { vscode } from '../bridge';
 
-const ArtboardHeader: React.FC<any> = ({ title, w, h }) => (
+const ArtboardHeader: React.FC<{ title: string; w: number; h: number }> = ({ title, w, h }) => (
   <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-[#0a0a0a]/50 backdrop-blur-sm rounded-t-2xl">
     <div className="flex items-center gap-3">
       <div className="p-1.5 bg-cyan-500/10 rounded-lg">
@@ -38,7 +33,7 @@ const ArtboardHeader: React.FC<any> = ({ title, w, h }) => (
   </div>
 );
 
-const Artboard: React.FC<any> = ({ title, w, h, devServerUrl, isSelectMode }) => {
+const Artboard: React.FC<{ title: string; w: number; h: number; devServerUrl: string | null; isSelectMode: boolean }> = ({ title, w, h, devServerUrl, isSelectMode }) => {
   const sandboxPort = useSystemStore(state => state.sandboxPort);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectedRect = useSelectionStore(state => state.rect);
@@ -62,8 +57,16 @@ const Artboard: React.FC<any> = ({ title, w, h, devServerUrl, isSelectMode }) =>
   }, [devServerUrl, sandboxPort]);
 
   useEffect(() => {
+    // v11.3: Hard-Flush — briefly empty the iframe to kill cached redirects
+    if (iframeRef.current) {
+        iframeRef.current.src = 'about:blank';
+        setTimeout(() => {
+            if (iframeRef.current) iframeRef.current.src = sandboxUrl;
+        }, 10);
+    }
+    
     iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSyncMode', selectMode: isSelectMode }, '*');
-  }, [isSelectMode]);
+  }, [isSelectMode, sandboxUrl]);
 
   const handleLoad = () => {
     // Bridge is now injected by Sandbox Proxy (Mechanical Perfection)
@@ -93,7 +96,9 @@ const Artboard: React.FC<any> = ({ title, w, h, devServerUrl, isSelectMode }) =>
             },
             elementSignature: { 
               tag: data.tagName ?? data.element ?? 'div', 
-              classes: data.classes ?? [] 
+              classes: data.classes ?? [],
+              textContent: data.textContent ?? '',
+              xpath: data.xpath ?? ''
             } 
           });
           break;
@@ -127,13 +132,21 @@ const Artboard: React.FC<any> = ({ title, w, h, devServerUrl, isSelectMode }) =>
   useEffect(() => {
     const handlePreview = (e: any) => {
       const { zenithId, property, value, styles } = e.detail;
-      iframeRef.current?.contentWindow?.postMessage({
-        type: 'zenithApplyStyle',
-        zenithId,
-        property,
-        value,
-        styles
-      }, '*');
+      
+      if (styles) {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'zenithBatchPatch',
+          zenithId,
+          styles
+        }, '*');
+      } else {
+        iframeRef.current?.contentWindow?.postMessage({
+          type: 'zenithPatchStyle',
+          id: zenithId,
+          property,
+          value
+        }, '*');
+      }
     };
 
     window.addEventListener('zenith-preview-style', handlePreview as any);
@@ -193,6 +206,14 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
   const canvasRef = useRef<HTMLDivElement>(null);
   const isSelectMode = activeTool === 'select' && !isSpacePressed;
 
+  // [W11] Hardening: Use a ref-synchronized state for native event listeners.
+  // This avoids 'ReferenceError: useCanvasStore is not defined' in the bundle
+  // and fixes stale closure bugs in the non-passive wheel handler.
+  const stateRef = useRef({ zoom, pan, selectedId, fiberInfo });
+  useEffect(() => {
+    stateRef.current = { zoom, pan, selectedId, fiberInfo };
+  }, [zoom, pan, selectedId, fiberInfo]);
+
   // v11.4: Auto-Center Logic (Fixed closure)
   useEffect(() => {
     const { zoom: z, pan: p } = stateRef.current;
@@ -200,16 +221,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
         setPan(100, 100); 
         setZoom(0.75); 
     }
-  }, []);
-
-  // [W11] Hardening: Use a ref-synchronized state for native event listeners.
-
-  // This avoids 'ReferenceError: useCanvasStore is not defined' in the bundle
-  // and fixes stale closure bugs in the non-passive wheel handler.
-  const stateRef = useRef({ zoom, pan, selectedId, fiberInfo });
-  useEffect(() => {
-    stateRef.current = { zoom, pan, selectedId, fiberInfo };
-  }, [zoom, pan, selectedId, fiberInfo]);
+  }, [setPan, setZoom]);
 
   // v7.0 Zoom-to-Mouse
   // v8.0 Master Keyboard Shortcuts (Onlook parity)

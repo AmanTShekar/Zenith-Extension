@@ -203,22 +203,53 @@ impl PatchStrategyPlugin for TailwindStrategy {
     }
 
     fn resolve_class(&self, property: &str, value: &str) -> Option<String> {
-        // Find the matching utility class in the static map.
-        // We use a reference to the pair for the lookup.
-        self.map.get(&(property, value)).map(|s: &&'static str| s.to_string())
+        // 1. Look in the static map (high-performance path)
+        if let Some(cls) = self.map.get(&(property, value)) {
+            return Some(cls.to_string());
+        }
+
+        // 2. Fallback to Tailwind v3 Arbitrary Values: e.g. w-[10px]
+        let prefix = match property {
+            "padding" => "p",
+            "paddingTop" => "pt",
+            "paddingRight" => "pr",
+            "paddingBottom" => "pb",
+            "paddingLeft" => "pl",
+            "margin" => "m",
+            "marginTop" => "mt",
+            "marginRight" => "mr",
+            "marginBottom" => "mb",
+            "marginLeft" => "ml",
+            "width" => "w",
+            "height" => "h",
+            "gap" => "gap",
+            "backgroundColor" => "bg",
+            "color" => "text",
+            "opacity" => "opacity",
+            _ => return None,
+        };
+
+        // Normalize value for arbitrary syntax: e.g. "10px" -> "[10px]"
+        // Note: Tailwind arbitrary values use underscores for spaces
+        let normalized = value.replace(' ', "_");
+        Some(format!("{}-[ {}]", prefix, normalized))
     }
 
     fn tokenize(&self, class_string: &str) -> Vec<StyleToken> {
-        class_string.split_whitespace().map(|s| StyleToken {
-            raw: s.to_string(),
-            css_property: None, // Would need full tailwind-config-js parser for real resolving
-            css_value: None,
-            is_utility: true,
+        class_string.split_whitespace().map(|s| {
+            // Very basic heuristic for utility identification
+            let is_utility = s.contains('-') || s == "flex" || s == "block" || s == "hidden";
+            StyleToken {
+                raw: s.to_string(),
+                css_property: None, 
+                css_value: None,
+                is_utility,
+            }
         }).collect()
     }
 
     fn generate_preview_css(&self, _class_name: &str) -> Option<String> {
-        None // Tailwind uses pre-generated or JIT CSS
+        None 
     }
 }
 
@@ -232,12 +263,16 @@ impl InlineStyleStrategy {
 impl PatchStrategyPlugin for InlineStyleStrategy {
     fn name(&self) -> &str { "InlineStyle" }
 
-    fn can_handle(&self, _ctx: &DetectionContext<'_>) -> Confidence {
-        Confidence::Low // Always available as a fallback
+    fn can_handle(&self, ctx: &DetectionContext<'_>) -> Confidence {
+        if ctx.style_attr.is_some() {
+            Confidence::High
+        } else {
+            Confidence::Low // Fallback
+        }
     }
 
     fn resolve_class(&self, _property: &str, _value: &str) -> Option<String> {
-        None // Inline styles don't use classes
+        None 
     }
 
     fn tokenize(&self, _class_string: &str) -> Vec<StyleToken> {

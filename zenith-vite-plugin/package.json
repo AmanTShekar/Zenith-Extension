@@ -7,9 +7,11 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "build:bin": "tsc --outDir dist --rootDir src src/bin/surgical-cli.ts src/surgical.ts",
+    "build:bin": "tsc -p tsconfig.json --module ESNext --moduleResolution bundler --allowImportingTsExtensions false",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "audit:surgical": "vitest tests/property_audit_aggressive.test.ts tests/surgical_audit.test.ts --run",
+    "surgical:doctor": "vitest tests/surgical_doctor.test.ts --run"
   },
   "dependencies": {
     "@babel/generator": "^7.26.0",

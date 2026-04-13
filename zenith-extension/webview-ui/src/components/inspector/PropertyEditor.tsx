@@ -9,9 +9,10 @@ interface PropertyFieldProps {
   value: string;
   sectionValues: Record<string, string>; // for showWhen conditional logic
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
 }
 
-function PropertyField({ property, definition, value, sectionValues, onChange }: PropertyFieldProps) {
+function PropertyField({ property, definition, value, sectionValues, onChange, onCommit }: PropertyFieldProps) {
   const label = definition.label || property;
 
   // --- showWhen conditional visibility (Puck-style field gating) ---
@@ -32,7 +33,10 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
             {definition.options?.map(opt => (
               <button
                 key={opt.value}
-                onClick={() => onChange(opt.value)}
+                onClick={() => {
+                  onChange(opt.value);
+                  onCommit?.(opt.value);
+                }}
                 title={opt.label}
                 className={[
                   'px-2 py-0.5 text-[9px] rounded transition-all border',
@@ -55,7 +59,10 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
           <span className="text-[10px] text-text-muted font-medium w-24 truncate">{label}</span>
           <select
             value={value || ''}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => {
+              onChange(e.target.value);
+              onCommit?.(e.target.value);
+            }}
             className="flex-1 bg-transparent text-[10px] text-text-primary text-right outline-none cursor-pointer hover:text-blue-400 transition-colors min-w-0"
           >
             <option value="">Default</option>
@@ -77,6 +84,8 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
               value={value || ''}
               placeholder="transparent"
               onChange={(e) => onChange(e.target.value)}
+              onBlur={(e) => onCommit?.(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onCommit?.(e.currentTarget.value)}
               className="bg-transparent text-[9px] font-mono text-text-primary text-right outline-none w-full min-w-0"
             />
             <div
@@ -87,6 +96,7 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
                 type="color"
                 value={value && value.startsWith('#') ? value : '#000000'}
                 onChange={(e) => onChange(e.target.value)}
+                onBlur={(e) => onCommit?.(e.target.value)}
                 className="absolute inset-0 opacity-0 cursor-pointer"
               />
               {!value && (
@@ -110,6 +120,7 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
               step={0.01}
               value={parseFloat(value) || 1}
               onChange={(e) => onChange(e.target.value)}
+              onMouseUp={(e) => onCommit?.(e.currentTarget.value)}
               className="flex-1 h-1 bg-white/5 rounded-full appearance-none accent-blue-500 cursor-pointer"
             />
             <span className="text-[9px] font-mono opacity-60 w-8 text-right">
@@ -141,6 +152,8 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
               type="text"
               value={value || ''}
               onChange={(e) => onChange(e.target.value)}
+              onBlur={(e) => onCommit?.(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onCommit?.(e.currentTarget.value)}
               placeholder="—"
               className="flex-1 bg-transparent text-[10px] font-mono text-text-primary text-right outline-none border-b border-transparent focus:border-blue-500/40 transition-colors"
             />
@@ -148,7 +161,7 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
         );
       }
 
-      const activeUnit = unit || definition.unit || '';
+      const activeUnit = unit || definition.unit || (definition.type === 'number' ? '' : 'px');
 
       return (
         <div className="flex items-center justify-between py-1 group px-4 hover:bg-white/[0.02]">
@@ -157,7 +170,14 @@ function PropertyField({ property, definition, value, sectionValues, onChange }:
             <ScrubInput
               value={num}
               unit={activeUnit}
-              onChange={(val) => onChange(`${val}${activeUnit}`)}
+              onChange={(val) => {
+                const finalVal = `${val}${activeUnit}`;
+                onChange(finalVal);
+              }}
+              onCommit={(val) => {
+                const finalVal = `${val}${activeUnit}`;
+                onCommit?.(finalVal);
+              }}
               className="text-right"
             />
           </div>
@@ -196,7 +216,14 @@ export function PropertyEditor() {
                       definition={def}
                       value={computedStyles[prop] ?? ''}
                       sectionValues={computedStyles}
-                      onChange={(val) => patchStyle(prop, val)}
+                      onChange={(val) => {
+                        // v11.3: Visual Hot-Path — Instant feedback without sidecar round-trip
+                        useSelectionStore.getState().actions.previewStyle(prop, val);
+                      }}
+                      onCommit={(val) => {
+                        // v11.3: Persistent Stage — Single RPC after interaction finishes
+                        useSelectionStore.getState().actions.patchStyle(prop, val);
+                      }}
                     />
                     {isOverriddenInState && (
                         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-[60%] bg-blue-500 rounded-r shadow-[0_0_8px_rgba(59,130,246,0.5)]" />

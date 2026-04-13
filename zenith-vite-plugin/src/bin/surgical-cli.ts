@@ -19,16 +19,17 @@
 import { readFileSync } from 'node:fs';
 import { patchSourceFile, type PatchInstructions } from '../surgical.js';
 
-const instructionsJson = process.argv[2];
-
-if (!instructionsJson) {
-  process.stderr.write('Usage: zenith-surgical <jsonInstructions>\n');
-  process.exit(1);
-}
-
 async function main() {
-  const source = readFileSync(0, 'utf8'); // Read from stdin
-  const instructions: PatchInstructions = JSON.parse(instructionsJson);
+  const input = readFileSync(0, 'utf8'); // Read JSON envelope from stdin
+  const envelope = JSON.parse(input);
+  
+  const source = envelope.source;
+  const instructions: PatchInstructions = envelope.instructions;
+
+  if (!source || !instructions) {
+    process.stderr.write('ERROR: Invalid JSON envelope (source or instructions missing)\n');
+    process.exit(1);
+  }
 
   // Apply AST surgical patch
   const patchedCode = patchSourceFile(source, instructions);

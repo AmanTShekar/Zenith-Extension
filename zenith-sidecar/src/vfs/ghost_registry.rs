@@ -308,7 +308,7 @@ mod tests {
         file.write_all(json.as_bytes()).unwrap();
 
         let mut registry = GhostRegistry::new();
-        registry.load_from_root(dir.path()).unwrap();
+        registry.load_from_root(dir.path(), None).unwrap();
 
         let entry = registry.lookup(&"src/App.tsx:10:5".to_string()).unwrap();
         assert_eq!(entry.tag_name, "div");

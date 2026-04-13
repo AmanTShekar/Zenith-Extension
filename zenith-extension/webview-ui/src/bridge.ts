@@ -3,7 +3,7 @@ declare const acquireVsCodeApi: any;
 class VSCodeBridge {
   private vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
-  postMessage(msg: any) {
+  postMessage(msg: { type: string; [key: string]: any }) {
     if (this.vscode) {
       this.vscode.postMessage(msg);
     } else {
@@ -12,7 +12,7 @@ class VSCodeBridge {
   }
 
   // Helper for staging properties
-  stage(element: string, property: string, value: string, stack: any[] = []) {
+  stage(element: string, property: string, value: string, stack: unknown[] = []) {
     this.postMessage({ 
       type: 'stage', 
       intent: { 

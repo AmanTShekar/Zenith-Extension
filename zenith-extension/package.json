@@ -85,7 +85,7 @@
         },
         "zenith.sandboxPort": {
           "type": "number",
-          "default": 3005,
+          "default": 3111,
           "description": "Port for the mirrored Zenith Sandbox (Port 3005 recommended)."
         },
         "zenith.launchInSeparateWindow": {

@@ -8,6 +8,7 @@ interface SystemState {
   theme: 'dark' | 'light';
   debugMode: boolean;
   isSpacePressed: boolean;
+  sandboxPort: number;
   notifications: Array<{ id: string; type: 'info' | 'error' | 'success'; message: string }>;
   actions: {
     setConnectedServer: (url: string | null) => void;
@@ -31,7 +32,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   theme: 'dark',
   debugMode: false,
   isSpacePressed: false,
-  sandboxPort: 3005,
+  sandboxPort: 3111,
   notifications: [],
   actions: {
     setConnectedServer: (connectedServer) => set({ connectedServer }),

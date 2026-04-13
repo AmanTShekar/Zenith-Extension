@@ -58,10 +58,15 @@ let sidebarProvider: ZenithViewProvider | undefined;
 let extensionContext: vscode.ExtensionContext;
 let statusBar: vscode.StatusBarItem;
 
+// v3.15 Monorepo Hard-Lock: Force targeting of the Zenith Demo application
+const MONOREPO_DEMO_LOCK = 'c:\\Users\\Asus\\Desktop\\ve\\zenith-demo';
+let lastValidWorkspaceRoot: string | undefined = MONOREPO_DEMO_LOCK;
+
 // ---------------------------------------------------------------------------
 // Common dev server ports to probe (order = likelihood)
+// BANNED: 8080 (Postgres/EDB), 8081, 8082
 // ---------------------------------------------------------------------------
-const COMMON_DEV_PORTS = [3000, 3001, 3002, 5173, 5174, 4173, 8000, 4000, 4321, 5500, 5501];
+const COMMON_DEV_PORTS = [3009, 3000, 5173, 5174, 4173, 4321, 5500];
 
 // ---------------------------------------------------------------------------
 // Activate
@@ -71,12 +76,31 @@ export async function activate(context: vscode.ExtensionContext) {
     console.log('Zenith v3.6 — Global Mode Activated');
     extensionContext = context;
 
+    // v11.3: Surgical Lockdown — Purge hijacked URLs from workspace state
+    const currentUrl = context.workspaceState.get<string>('zenith.projectUrl');
+    if (currentUrl?.includes('enterprisedb.com') || currentUrl?.includes(':8080')) {
+        console.warn('[Zenith Lockdown] Purging hijacked URL from state:', currentUrl);
+        context.workspaceState.update('zenith.projectUrl', undefined);
+        context.workspaceState.update('zenith.detectedServers', undefined);
+    }
+    
     // --- Status Bar (Change #9) ---
     statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBar.command = 'zenith.visualEdit';
     statusBar.tooltip = 'Zenith Designer';
     statusBar.show();
     context.subscriptions.push(statusBar);
+    
+    // v3.15 Monorepo Priming: Auto-detect 'zenith-demo' to prevent 'Off' state on startup
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    for (const folder of folders) {
+        const demoPath = path.join(folder.uri.fsPath, 'zenith-demo');
+        if (fs.existsSync(demoPath)) {
+            lastValidWorkspaceRoot = demoPath;
+            console.log(`[Zenith] Monorepo detected. Priming 'zenith-demo' as sticky target: ${demoPath}`);
+            break;
+        }
+    }
 
     // --- Workspace folder watcher (Change #10) ---
     context.subscriptions.push(
@@ -91,6 +115,15 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         })
     );
+
+    // v11.3: Auto-Prime — trigger sidecar start for all folders already present
+    for (const folder of folders) {
+        if (zenithConfig().autoStart) {
+            void ensureSidecarForWorkspace(folder.uri.fsPath).catch(err => {
+                console.error(`[Zenith] Auto-prime failed for ${folder.uri.fsPath}:`, err);
+            });
+        }
+    }
 
     // --- Active editor change → update status bar + selection sync ---
     context.subscriptions.push(
@@ -222,6 +255,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
                 handle.stagedCount++;
                 updateStatusBar(root);
+                broadcastToWebviews({
+                    type: 'status',
+                    connected: true,
+                    workspaceRoot: root,
+                    stagedCount: handle.stagedCount
+                });
                 return { ...result, tx_id: txId };
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Zenith Stage Failed: ${err.message || err}`);
@@ -229,25 +268,29 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('zenith.engine.commit', async (zenithId: string) => {
+        vscode.commands.registerCommand('zenith.engine.commit', async (zenithId?: string) => {
             const root = await resolveTargetWorkspace(true);
             if (!root) return;
             const handle = activeSidecars.get(root);
             if (!handle) return;
             try {
-                // v5.3: Corrected RPC method names for Sidecar sync (Patch 17)
-                // - vfs.commit: Global commit (no args)
-                // - zenith.engine.commit: Per-element commit (takes zenithID)
-                const method = zenithId === '' ? 'vfs.commit' : 'zenith.engine.commit';
-                const result = await handle.rpc.call(method, zenithId === '' ? [] : [zenithId]);
+                const targetId = zenithId || '';
+                const method = targetId === '' ? 'vfs.commit' : 'zenith.engine.commit';
+                const result = await handle.rpc.call(method, targetId === '' ? [] : [targetId]);
                 
-                // v3.10 Fix: After persisting to disk, ensure internal VS Code state is fresh
-                if (zenithId === '') {
+                if (targetId === '') {
                     handle.stagedCount = 0;
                 } else {
                     handle.stagedCount = Math.max(0, handle.stagedCount - 1);
                 }
                 updateStatusBar(root);
+                broadcastToWebviews({
+                    type: 'status',
+                    connected: true,
+                    workspaceRoot: root,
+                    stagedCount: handle.stagedCount
+                });
+                return result;
 
                 // Onlook Parity: Force VS Code to re-read files if they are currently open
                 // This ensures the "Source of Truth" in the IDE matches the visual edits instantly.
@@ -566,6 +609,9 @@ export async function detectDevServers(): Promise<string[]> {
 
     const probes: Promise<string>[] = [];
     for (const port of COMMON_DEV_PORTS) {
+        // Double-check blacklist even if port is in the common list (Surgical Lockdown)
+        if (port === 8080 || port === 8081 || port === 8082) continue;
+        
         probes.push(probe('localhost', port));
         probes.push(probe('127.0.0.1', port));
     }
@@ -593,9 +639,22 @@ export async function detectDevServers(): Promise<string[]> {
 
 
 async function resolveProjectPort(workspaceRoot: string): Promise<number | null> {
+    // v3.15 Monorepo Hard-Pinning: Always prefer 3001 for the Demo
+    const lowerRoot = workspaceRoot.toLowerCase();
+    if (lowerRoot.includes('zenith-demo')) {
+        return 3009;
+    }
+
     // Priority 1: User-set override in VS Code settings
     const configSetting = vscode.workspace.getConfiguration('zenith').get<number>('devServerPort', 0);
-    if (configSetting > 0) return configSetting;
+    if (configSetting > 0) {
+        // Explicitly forbid 8080 even if set in settings, to protect the developer
+        if (configSetting === 8080) {
+            vscode.window.showErrorMessage('Zenith: Port 8080 is reserved for databases (Postgres). Redirection blocked.');
+            return null;
+        }
+        return configSetting;
+    }
 
     // Priority 2: Explicit Zenith config file
     const zenithConfigPath = path.join(workspaceRoot, 'zenith.config.ts');
@@ -612,7 +671,7 @@ async function resolveProjectPort(workspaceRoot: string): Promise<number | null>
     if (fs.existsSync(viteConfigPath)) {
         try {
             const raw = fs.readFileSync(viteConfigPath, 'utf8');
-            // Support both "port: 3001" and "port = 3001"
+            // Support both "port: 3009" and "port = 3009"
             const match = raw.match(/port:\s*(\d+)/i) || raw.match(/port\s*=\s*(\d+)/i);
             if (match) return parseInt(match[1], 10);
         } catch {}
@@ -702,12 +761,17 @@ export async function initializeProject(workspaceRoot: string): Promise<ProjectC
         detectTailwind(workspaceRoot),
     ]);
 
-    const preferredPort = workspaceRoot.includes('zenith-demo') ? '3001' : null;
+    const preferredPort = workspaceRoot.toLowerCase().includes('zenith-demo') ? '3009' : null;
     let devServer = detectedSites.find(s => preferredPort && s.includes(preferredPort)) || detectedSites[0];
     
-    // Final fallback
-    if (!devServer) {
+    // Final fallback (Surgical Lockdown: Force 3009 for Demo)
+    if (!devServer || (preferredPort && !devServer.includes(preferredPort))) {
         devServer = preferredPort ? `http://127.0.0.1:${preferredPort}` : 'http://127.0.0.1:3000';
+    }
+
+    // Safety: If somehow we still got a non-local URL, set it back to local
+    if (devServer.includes('enterprisedb.com') || devServer.includes(':8080')) {
+        devServer = 'http://127.0.0.1:3009';
     }
 
     const config: ProjectConfig = {
@@ -866,6 +930,11 @@ function getWorkspaceRootForFile(filePath: string): string | undefined {
  * - If multiple folders and no hint → QuickPick
  */
 async function resolveTargetWorkspace(silent = false): Promise<string | undefined> {
+    // v3.15 Monorepo Hard-Lock: Always favor the demo project if present
+    if (MONOREPO_DEMO_LOCK && fs.existsSync(MONOREPO_DEMO_LOCK)) {
+        return MONOREPO_DEMO_LOCK;
+    }
+
     const folders = vscode.workspace.workspaceFolders ?? [];
 
     if (folders.length === 0) {
@@ -876,12 +945,29 @@ async function resolveTargetWorkspace(silent = false): Promise<string | undefine
     // High Priority: Always check the active editor first (Change #10)
     const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
     if (activeFile) {
-        const root = getWorkspaceRootForFile(activeFile);
-        if (root) return root;
+        let root = getWorkspaceRootForFile(activeFile);
+        if (root) {
+            const lowerRoot = root.toLowerCase();
+            const isExcluded = lowerRoot.includes('zenith-extension') || lowerRoot.includes('zenith-vite-plugin');
+
+            if (isExcluded) {
+                // If focused on Zenith source code, stick to the last valid project
+                if (lastValidWorkspaceRoot) return lastValidWorkspaceRoot;
+            } else {
+                // If focused on a new valid project, update the sticky root
+                lastValidWorkspaceRoot = root;
+                return root;
+            }
+        }
     }
 
     if (folders.length === 1) {
-        return folders[0].uri.fsPath;
+        const root = folders[0].uri.fsPath;
+        const lowerRoot = root.toLowerCase();
+        if (!lowerRoot.includes('zenith-extension') && !lowerRoot.includes('zenith-vite-plugin')) {
+            lastValidWorkspaceRoot = root;
+        }
+        return root;
     }
 
     // Multiple roots and no active editor — ask the user
@@ -961,7 +1047,7 @@ function zenithConfig(): ZenithConfig {
         autoStart: cfg.get<boolean>('autoStart', true),
         devServerPort: cfg.get<number>('devServerPort', 0),
         sidecarPort: cfg.get<number>('sidecarPort', 8083),
-        sandboxPort: cfg.get<number>('sandboxPort', 3005),
+        sandboxPort: cfg.get<number>('sandboxPort', 3111),
         showWelcome: cfg.get<boolean>('showWelcome', true),
         logLevel: cfg.get<string>('logLevel', 'info'),
         launchInSeparateWindow: cfg.get<boolean>('launchInSeparateWindow', true),
@@ -1078,8 +1164,8 @@ async function handleWebviewMessage(
                 
                 for (const folder of folders) {
                     const folderPath = folder.uri.fsPath;
-                    // If the folder is zenith-demo and port is 3001, it's a match
-                    if (folderPath.includes('zenith-demo') && url.includes('3001')) {
+                    // If the folder is zenith-demo and port is 3009, it's a match
+                    if (folderPath.includes('zenith-demo') && url.includes('3009')) {
                         targetRoot = folderPath;
                         break;
                     }
@@ -1314,7 +1400,15 @@ async function handleWebviewMessage(
             return;
 
         case 'patchStyle':
-        case 'stage':
+        case 'stage': {
+            const isText = message.type === 'zenithTextEdit' || message.property === 'textContent';
+            const rpcIntent = message.intent || {
+                type: isText ? 'TextChange' : 'PropertyChange',
+                element: message.zenithId,
+                property: message.property,
+                value: message.value,
+                new_text: message.newText || (isText ? message.value : undefined), 
+            };
             try {
                 if (!handle) throw new Error('Not connected to sidecar');
                 
@@ -1323,14 +1417,9 @@ async function handleWebviewMessage(
                 const interactionState = message.interactionState || 'base';
 
                 if (zenithId) {
-                    await vscode.commands.executeCommand('zenith.engine.stage', {
-                        element: zenithId,
-                        property: message.property,
-                        value: message.value,
-                        stack: message.zenithStack || [],
-                        state: interactionState
-                    });
+                    await vscode.commands.executeCommand('zenith.engine.stage', rpcIntent);
                 } else if (signature) {
+
                     await handle.rpc.call('vfs.stage_universal', [
                         signature,
                         message.property,
@@ -1348,6 +1437,7 @@ async function handleWebviewMessage(
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Failed to stage design: ${e.message}`, level: 'error' });
             }
+        }
             return;
 
         case 'zenithBatchPatch':
@@ -1824,7 +1914,7 @@ class ZenithPanel {
                 name: path.basename(this._workspaceRoot),
                 framework: handle?.framework ?? 'Unknown',
                 port: actualRpcPort,
-                devServerUrl: config.devServerUrl,
+                devServerUrl: this._workspaceRoot.toLowerCase().includes('zenith-demo') ? 'http://127.0.0.1:3009' : config.devServerUrl,
                 surgical: vscode.workspace.getConfiguration('zenith').get('surgicalMode', false)
             });
             

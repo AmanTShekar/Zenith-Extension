@@ -127,23 +127,42 @@ export function injectGhostIds(
       const col = node.loc?.start.column ?? 0;
       const tagName = getTagName(node.name);
       
-      // v9.5 Mechanical Perfection: Stable Tree-Path IDs
+      // v9.6 Mechanical Perfection: Stable Tree-Path IDs
       // Format: filePath:tag.idx:parentTag.idx...
-      const getChildIndex = (p: any, target: any) => {
-        if (!p || !p.node || !p.node.children) return 0;
-        return p.node.children.indexOf(target);
+      const getChildIndex = (targetPath: any) => {
+        const parentElementPath = targetPath.findParent((p: any) => t.isJSXElement(p.node) || t.isJSXFragment(p.node));
+        if (!parentElementPath) return 0;
+        
+        const siblings = (parentElementPath.parent as any).children || [];
+        return siblings.indexOf(parentElementPath.node);
       };
 
-      let pathId = `${tagName}.${getChildIndex(path.parentPath, path.node)}`;
-      let p = path.parentPath;
-      while (p && !t.isProgram(p.node)) {
-        if (t.isJSXOpeningElement(p.node)) {
-          const parentNode = p.node;
-          const grandParent = p.parentPath;
-          const idx = getChildIndex(grandParent, p.node);
-          pathId = `${getTagName(parentNode.name)}.${idx}:${pathId}`;
+      // v9.7 Mechanical Perfection: stable IDs via tag-sibling index
+      const getJSXElementIndex = (path: any): number => {
+        const jsxElementPath = path.isJSXOpeningElement() ? path.parentPath : path;
+        const siblings = (jsxElementPath.parentPath?.node as any)?.children || [];
+        let jsxIdx = 0;
+        for (const sib of siblings) {
+          if (sib === jsxElementPath.node) return jsxIdx;
+          if (t.isJSXElement(sib)) jsxIdx++;
         }
-        p = p.parentPath;
+        return 0;
+      };
+
+      let pathId = `${getTagName(node.name)}.${getJSXElementIndex(path)}`;
+      let p = path.parentPath; // JSXElement
+
+      while (p && !t.isProgram(p.node)) {
+          const parent = p.parentPath?.node;
+          if (t.isJSXElement(parent) || t.isJSXFragment(parent)) {
+              const parentOpening = (parent as any).openingElement;
+              if (parentOpening) {
+                  const tag = getTagName(parentOpening.name);
+                  const idx = getJSXElementIndex(p.parentPath);
+                  pathId = `${tag}.${idx}:${pathId}`;
+              }
+          }
+          p = p.parentPath;
       }
       
       const ghostId = `${normalizedPath}:${pathId}`;

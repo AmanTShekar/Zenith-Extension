@@ -28,7 +28,7 @@
 //! | 11 | InlineComponent | * | Escalate (destructive) |
 //! | 12 | * | * (non-overlapping) | NoConflict |
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
@@ -125,6 +125,15 @@ pub enum MutationIntent {
         timestamp: u64,
     },
 
+    /// Batch property changes (v5.5 Optimized for Resize/Drag)
+    #[serde(rename_all = "camelCase")]
+    BatchPropertyChange {
+        element: ZenithId,
+        styles: HashMap<String, String>,
+        timestamp: u64,
+    },
+
+
     /// Reorder children within a parent.
     #[serde(rename_all = "camelCase")]
     Reorder {
@@ -210,6 +219,7 @@ impl MutationIntent {
     pub fn timestamp(&self) -> u64 {
         match self {
             Self::PropertyChange { timestamp, .. } => *timestamp,
+            Self::BatchPropertyChange { timestamp, .. } => *timestamp,
             Self::Reorder { timestamp, .. } => *timestamp,
             Self::Reparent { timestamp, .. } => *timestamp,
             Self::ExtractComponent { timestamp, .. } => *timestamp,
@@ -227,6 +237,7 @@ impl MutationIntent {
     pub fn affected_ids(&self) -> Vec<&ZenithId> {
         match self {
             Self::PropertyChange { element, .. } => vec![element],
+            Self::BatchPropertyChange { element, .. } => vec![element],
             Self::Reorder { parent, old_order, new_order, .. } => {
                 let mut ids: Vec<&ZenithId> = vec![parent];
                 ids.extend(old_order.iter());
@@ -469,7 +480,7 @@ impl OtEngine {
                 }
             }
 
-            // Rule 3: PropertyChange + PropertyChange → LWW
+            // Rule 3: PropertyChange / BatchPropertyChange → LWW
             (
                 MutationIntent::PropertyChange { element: h_el, timestamp: h_ts, .. },
                 MutationIntent::PropertyChange { element: a_el, timestamp: a_ts, .. },
@@ -480,6 +491,40 @@ impl OtEngine {
                     description: format!("Property conflict resolved via LWW (timestamp: {})", if h_ts >= a_ts { "human" } else { "ai" }),
                 }
             }
+
+            (
+                MutationIntent::BatchPropertyChange { element: h_el, timestamp: h_ts, .. },
+                MutationIntent::PropertyChange { element: a_el, timestamp: a_ts, .. },
+            ) if h_el == a_el => {
+                let winner = if h_ts >= a_ts { human_intent.clone() } else { ai_intent.clone() };
+                TransformResult::AutoMerge {
+                    steps: vec![winner],
+                    description: "Batch property conflict vs single property resolved via LWW".into(),
+                }
+            }
+
+            (
+                MutationIntent::PropertyChange { element: h_el, timestamp: h_ts, .. },
+                MutationIntent::BatchPropertyChange { element: a_el, timestamp: a_ts, .. },
+            ) if h_el == a_el => {
+                let winner = if h_ts >= a_ts { human_intent.clone() } else { ai_intent.clone() };
+                TransformResult::AutoMerge {
+                    steps: vec![winner],
+                    description: "Property conflict vs batch property resolved via LWW".into(),
+                }
+            }
+
+            (
+                MutationIntent::BatchPropertyChange { element: h_el, timestamp: h_ts, .. },
+                MutationIntent::BatchPropertyChange { element: a_el, timestamp: a_ts, .. },
+            ) if h_el == a_el => {
+                let winner = if h_ts >= a_ts { human_intent.clone() } else { ai_intent.clone() };
+                TransformResult::AutoMerge {
+                    steps: vec![winner],
+                    description: "Batch property conflict resolved via LWW".into(),
+                }
+            }
+
 
             // Rule 4: InsertNode + InsertNode at same parent → Deterministic Order
             (
@@ -800,10 +845,12 @@ mod tests {
             parent: "nav".into(),
             old_order: vec!["a".into(), "b".into(), "c".into()],
             new_order: vec!["b".into(), "a".into(), "c".into()],
+            timestamp: 0,
         };
         let ai = MutationIntent::ExtractComponent {
             nodes: vec!["a".into(), "b".into(), "c".into()],
             new_component_name: "NavBar".into(),
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, description } => {
@@ -820,10 +867,12 @@ mod tests {
             parent: "nav".into(),
             old_order: vec!["a".into(), "b".into(), "c".into(), "d".into()],
             new_order: vec!["b".into(), "a".into(), "c".into(), "d".into()],
+            timestamp: 0,
         };
         let ai = MutationIntent::ExtractComponent {
             nodes: vec!["a".into(), "b".into()], // Only extracts 2 of 4
             new_component_name: "NavBar".into(),
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::HumanReview { rule, .. } => assert_eq!(rule, 1),
@@ -833,9 +882,9 @@ mod tests {
 
     #[test]
     fn test_rule_2_delete_plus_reparent() {
-        let human = MutationIntent::DeleteNode { node: "btn".into() };
+        let human = MutationIntent::DeleteNode { node: "btn".into(), timestamp: 0 };
         let ai = MutationIntent::Reparent {
-            node: "btn".into(), old_parent: "old".into(), new_parent: "new".into(),
+            node: "btn".into(), old_parent: "old".into(), new_parent: "new".into(), timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::HumanReview { rule, .. } => assert_eq!(rule, 2),
@@ -846,10 +895,10 @@ mod tests {
     #[test]
     fn test_rule_3_property_lww() {
         let human = MutationIntent::PropertyChange {
-            element: "hero".into(), property: "padding".into(), value: "20px".into(),
+            element: "hero".into(), property: "padding".into(), value: "20px".into(), timestamp: 0,
         };
         let ai = MutationIntent::PropertyChange {
-            element: "hero".into(), property: "padding".into(), value: "40px".into(),
+            element: "hero".into(), property: "padding".into(), value: "40px".into(), timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, .. } => {
@@ -862,10 +911,10 @@ mod tests {
     #[test]
     fn test_rule_4_insert_plus_insert() {
         let human = MutationIntent::InsertNode {
-            parent: "list".into(), index: 1, node_type: "li".into(),
+            parent: "list".into(), index: 1, node_type: "li".into(), timestamp: 0,
         };
         let ai = MutationIntent::InsertNode {
-            parent: "list".into(), index: 2, node_type: "li".into(),
+            parent: "list".into(), index: 2, node_type: "li".into(), timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, .. } => {
@@ -882,8 +931,8 @@ mod tests {
 
     #[test]
     fn test_rule_5_delete_plus_delete() {
-        let human = MutationIntent::DeleteNode { node: "trash".into() };
-        let ai = MutationIntent::DeleteNode { node: "trash".into() };
+        let human = MutationIntent::DeleteNode { node: "trash".into(), timestamp: 0 };
+        let ai = MutationIntent::DeleteNode { node: "trash".into(), timestamp: 0 };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, .. } => assert_eq!(steps.len(), 1),
             other => panic!("Expected AutoMerge (dedup), got {other:?}"),
@@ -896,11 +945,13 @@ mod tests {
             parent: "list".into(),
             old_order: vec!["a".into(), "b".into()],
             new_order: vec!["b".into(), "a".into()],
+            timestamp: 0,
         };
         let ai = MutationIntent::Reorder {
             parent: "list".into(),
             old_order: vec!["a".into(), "b".into()],
             new_order: vec!["a".into(), "b".into()],
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, description } => {
@@ -914,10 +965,10 @@ mod tests {
     #[test]
     fn test_rule_7_reparent_plus_reparent() {
         let human = MutationIntent::Reparent {
-            node: "btn".into(), old_parent: "a".into(), new_parent: "b".into(),
+            node: "btn".into(), old_parent: "a".into(), new_parent: "b".into(), timestamp: 0,
         };
         let ai = MutationIntent::Reparent {
-            node: "btn".into(), old_parent: "a".into(), new_parent: "c".into(),
+            node: "btn".into(), old_parent: "a".into(), new_parent: "c".into(), timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::HumanReview { rule, .. } => assert_eq!(rule, 7),
@@ -930,10 +981,12 @@ mod tests {
         let human = MutationIntent::ExtractComponent {
             nodes: vec!["a".into(), "b".into()],
             new_component_name: "Panel".into(),
+            timestamp: 0,
         };
         let ai = MutationIntent::ExtractComponent {
             nodes: vec!["b".into(), "c".into()], // "b" overlaps
             new_component_name: "Card".into(),
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::HumanReview { rule, .. } => assert_eq!(rule, 8),
@@ -943,10 +996,11 @@ mod tests {
 
     #[test]
     fn test_rule_10_delete_from_extraction() {
-        let human = MutationIntent::DeleteNode { node: "b".into() };
+        let human = MutationIntent::DeleteNode { node: "b".into(), timestamp: 0 };
         let ai = MutationIntent::ExtractComponent {
             nodes: vec!["a".into(), "b".into(), "c".into()],
             new_component_name: "Group".into(),
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::AutoMerge { steps, .. } => {
@@ -966,11 +1020,12 @@ mod tests {
 
     #[test]
     fn test_rule_11_inline_escalates() {
-        let human = MutationIntent::InlineComponent { component: "Nav".into() };
+        let human = MutationIntent::InlineComponent { component: "Nav".into(), timestamp: 0 };
         let ai = MutationIntent::Reorder {
             parent: "Nav".into(),
             old_order: vec!["a".into()],
             new_order: vec!["a".into()],
+            timestamp: 0,
         };
         match OtEngine::transform(&human, &ai) {
             TransformResult::HumanReview { rule, .. } => assert_eq!(rule, 11),
@@ -981,10 +1036,10 @@ mod tests {
     #[test]
     fn test_rule_12_non_overlapping() {
         let human = MutationIntent::PropertyChange {
-            element: "hero".into(), property: "padding".into(),
+            element: "hero".into(), property: "padding".into(), value: "20px".into(), timestamp: 0,
         };
         let ai = MutationIntent::PropertyChange {
-            element: "footer".into(), property: "margin".into(),
+            element: "footer".into(), property: "margin".into(), value: "10px".into(), timestamp: 0,
         };
         assert!(matches!(OtEngine::transform(&human, &ai), TransformResult::NoConflict));
     }

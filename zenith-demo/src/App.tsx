@@ -1,73 +1,126 @@
-import { useState } from 'react'
-
+import { useState } from "react";
 function App() {
-  const [count, setCount] = useState(0)
-
+  const [count, setCount] = useState(0);
   return (
-    <div style={{ 
-      padding: '40px', 
-      fontFamily: 'Inter, sans-serif',
-      minHeight: '100vh',
-      backgroundColor: '#0f172a',
-      color: '#f8fafc'
-    }}>
-      <header style={{ marginBottom: '40px' }}>
-        <h1 style={{ fontSize: '3rem', fontWeight: 800, marginBottom: '16px' }}>
-          Zenith <span style={{ color: '#38bdf8' }}>Demo</span>
+    <div
+      style={{
+        padding: "40px",
+        fontFamily: "Inter, sans-serif",
+        minHeight: "100vh",
+        backgroundColor: "#0f172a",
+        color: "#f8fafc",
+      }}
+    >
+      <header
+        style={{
+          marginBottom: "40px",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: "3rem",
+            fontWeight: 800,
+            marginBottom: "16px",
+          }}
+        >
+          <span
+            style={{
+              opacity: "1",
+              padding: "2rem",
+              width: "500px",
+              textAlign: "center",
+              fontWeight: "",
+              color: "#ffffff",
+            }}
+          >
+            hi
+          </span>{" "}
+          <span
+            style={{
+              color: "#38bdf8",
+              fontFamily: "",
+              opacity: "0.92",
+              textAlign: "center",
+            }}
+          >
+            aman
+          </span>
         </h1>
-        <p style={{ fontSize: '1.25rem', color: '#94a3b8' }}>
-          The first event-driven design engine. Test your extension logic below.
+
+        <p
+          style={{
+            fontSize: "1.25rem",
+            color: "#94a3b8",
+          }}
+        >
+          End-to-end mutation pipeline is active. Try resizing or changing styles.
         </p>
       </header>
 
-      <main style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
-        gap: '24px' 
-      }}>
-        {/* Selection Test Card */}
-        <section style={{ 
-          padding: '24px', 
-          borderRadius: '16px', 
-          backgroundColor: '#1e293b',
-          border: '1px solid #334155'
-        }}>
-          <h2 style={{ fontSize: '1.5rem', marginBottom: '12px' }}>Style Persistence</h2>
-          <p style={{ marginBottom: '20px', color: '#94a3b8' }}>
-            Modify this card's background or text color in the Zenith inspector.
-          </p>
-          <div style={{ 
-            padding: '12px', 
-            backgroundColor: '#0ea5e9', 
-            borderRadius: '8px',
-            textAlign: 'center',
-            fontWeight: 600
-          }}>
-            Interactive Element
+      <main
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: "24px",
+        }}
+      >
+        <section
+          style={{
+            padding: "24px",
+            borderRadius: "16px",
+            backgroundColor: "#1e293b",
+            border: "1px solid #334155",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.5rem",
+              marginBottom: "12px",
+            }}
+          >
+            bye bye
+          </h2>
+          <div
+            style={{
+              padding: "12px",
+              backgroundColor: "#10b981",
+              borderRadius: "8px",
+              textAlign: "center",
+              fontWeight: 600,
+              width: "572px",
+            }}
+          >
+            Operational
           </div>
         </section>
 
-        {/* State Test Card */}
-        <section style={{ 
-          padding: '24px', 
-          borderRadius: '16px', 
-          backgroundColor: '#1e293b',
-          border: '1px solid #334155'
-        }}>
-          <h2 style={{ fontSize: '1.5rem', marginBottom: '12px' }}>State Resilience</h2>
-          <p style={{ marginBottom: '20px', color: '#94a3b8' }}>
-            Counter ensures that Zenith's design edits don't wipe React memory.
-          </p>
-          <button 
+        <section
+          style={{
+            padding: "24px",
+            borderRadius: "16px",
+            backgroundColor: "#1e293b",
+            border: "1px solid #334155",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.5rem",
+              marginBottom: "12px",
+            }}
+          >
+            Counter
+          </h2>
+          <button
             onClick={() => setCount(count + 1)}
-            style={{ 
-              padding: '12px 24px', 
-              backgroundColor: '#334155', 
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '1rem'
+            style={{
+              padding: "12px 24px",
+              backgroundColor: "#38bdf8",
+              color: "white",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              fontSize: "1rem",
+              fontWeight: "bold",
             }}
           >
             Count is {count}
@@ -75,7 +128,6 @@ function App() {
         </section>
       </main>
     </div>
-  )
+  );
 }
-
-export default App
+export default App;

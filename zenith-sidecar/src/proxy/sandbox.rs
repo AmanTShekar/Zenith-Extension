@@ -321,13 +321,49 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
   });
 
   // 3. Style Previews (HMR Fast-Path)
+  // 3. Style Previews (HMR Fast-Path)
+  let isActive = true;
   window.addEventListener('message', (event) => {
-    if (event.data.type === 'zenithApplyStyle') {
-      const { zenithId, property, value } = event.data;
-      console.log("[ZENITH-BRIDGE] Style applied:", property, "=", value, "on", zenithId);
+    // Selection Mode Toggle
+    if (event.data.type === 'zenithSyncMode') {
+      isActive = event.data.selectMode;
+      console.log("[ZENITH-BRIDGE] Selector Active:", isActive);
+    }
+
+    // Force selection from sidebar
+    if (event.data.type === 'zenithForceSelect') {
+      const target = document.querySelector(`[data-zenith-id="${event.data.id}"]`);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        syncSelectedRect(target);
+      }
+    }
+
+    // Single property update
+    if (event.data.type === 'zenithPatchStyle') {
+      const { id, property, value } = event.data;
+      const target = document.querySelector(`[data-zenith-id="${id}"]`);
+      if (target) {
+        let finalValue = value;
+        // Auto-unit injection for common dimension properties
+        if (['width','height','top','left','right','bottom','padding','margin','fontSize','gap'].includes(property)) {
+            if (!isNaN(value) && value !== '') finalValue = value + 'px';
+        }
+        target.style[property] = finalValue;
+        syncSelectedRect(target);
+      }
+    }
+    
+    // Batch property update
+    if (event.data.type === 'zenithBatchPatch') {
+      const { zenithId, styles } = event.data;
       const target = document.querySelector(`[data-zenith-id="${zenithId}"]`);
       if (target) {
-        target.style[property] = value;
+        Object.entries(styles).forEach(([prop, val]) => {
+          let fv = val;
+          if (['width','height','top','left'].includes(prop) && !isNaN(val)) fv = val + 'px';
+          target.style[prop] = fv;
+        });
         syncSelectedRect(target);
       }
     }

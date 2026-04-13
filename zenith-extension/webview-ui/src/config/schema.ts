@@ -15,6 +15,12 @@ export interface SectionDefinition {
 }
 
 export const DESIGN_SCHEMA: Record<string, SectionDefinition> = {
+  content: {
+    title: 'Content',
+    properties: {
+      textContent: { label: 'Text', type: 'text' },
+    },
+  },
   layout: {
     title: 'Layout',
     properties: {

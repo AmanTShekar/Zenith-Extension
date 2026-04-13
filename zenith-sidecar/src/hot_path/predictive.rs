@@ -243,7 +243,7 @@ mod tests {
         let patcher = PredictivePatcher::new(rx, cache);
 
         // Current value is 16.0 (p-4 in Tailwind, index 14 in scale)
-        let neighbors = patcher.compute_neighbors(0, 16.0, Unit::TailwindStep);
+        let neighbors = patcher.compute_neighbors(0, 16.0, Unit::TailwindStep, 0.0);
         // Should include values around 16: 12, 14, 20 (±2 in scale)
         assert!(!neighbors.is_empty());
         assert!(!neighbors.contains(&16.0)); // Current value excluded
@@ -255,7 +255,7 @@ mod tests {
         let cache = Arc::new(DashMap::new());
         let patcher = PredictivePatcher::new(rx, cache);
 
-        let neighbors = patcher.compute_neighbors(0, 24.0, Unit::Px);
+        let neighbors = patcher.compute_neighbors(0, 24.0, Unit::Px, 0.0);
         assert_eq!(neighbors, vec![22.0, 23.0, 25.0, 26.0]);
     }
 
