@@ -2,7 +2,20 @@
 
 ![Zenith Banner](https://raw.githubusercontent.com/AmanTShekar/Zenith-Extension/main/banner.png)
 
-Zenith is a high-performance, agentic design engine that transforms any web project into a visual artboard directly inside VS Code. Built for the next generation of "Antigravity" developers, Zenith enables surgical DOM manipulation with atomic precision, ensuring your source code remains clean, readable, and perfectly synchronized.
+<p align="center">
+  <b>Visualizing the code, surgically. Built for the Antigravity generation.</b>
+</p>
+
+<p align="center">
+  <!-- START VIDEO DEMO SLOT -->
+  <a href="https://github.com/AmanTShekar/Zenith-Extension">
+    <img src="https://raw.githubusercontent.com/AmanTShekar/Zenith-Extension/main/demo-thumbnail.png" width="100%" alt="Zenith Engine in Action" />
+  </a>
+  <i>Zenith v11.7: Hardened Surgical Pipeline</i>
+  <!-- END VIDEO DEMO SLOT -->
+</p>
+
+Zenith is a high-performance, agentic design engine that transforms any web project into a visual artboard directly inside VS Code. It enables surgical DOM manipulation with atomic precision, ensuring your source code remains clean, readable, and perfectly synchronized.
 
 ## 🚀 The Antigravity Advantage
 
@@ -11,29 +24,41 @@ Zenith isn't just a builder; it's a **Surgical Design OS**. Unlike traditional v
 - **Atomic Structural Editing**: Move, Group, Reorder, and Insert elements with zero-friction. 
 - **Surgical Mode**: AI-assisted styling and structural changes that respect your existing code patterns.
 - **HMR-Native Synchronization**: Real-time previews powered by a high-speed Virtual File System (VFS) and Sidecar RPC.
-- **Universal Framework Support**: Deeply integrated with Vite, Next.js, and any framework supporting standard HMR.
+- **Universal Framework Support**: Deeply integrated with Vite, Next.js, and modern web stacks.
 
-## 🛠 Project Architecture
+## 🛠 Surgical Engine Specification: "Ghost-ID" v11.7
 
-Zenith is structured as a high-performance monorepo:
+Zenith utilizes a custom **Spectral Mapping** strategy that sets it apart from industry standards like Onlook or Builder.io.
 
-- **`zenith-sidecar`**: The heartbeat of Zenith. A Rust-based engine handling the VFS, AST surgery, and Proxy management.
+### Structural Path Mapping vs. Line Mapping
+| Feature | Traditional Line-Mapping | Zenith Structural-Path (Ours) |
+| :--- | :--- | :--- |
+| **Strategy** | `file:line:col` | `file:tag.idx:tag.idx` |
+| **Resilience** | Breaks if lines shift in VS Code | **Stable** regardless of line positions |
+| **Build Overhead** | High (bloats bundle with metadata) | **Low** (structural indices only) |
+| **Self-Healing** | Manual re-calibration required | **Automatic** via Fuzzy Fingerprinting |
+
+### Antigravity Standards (v11.7 Resilience)
+The Zenith Engine incorporates advanced safety protocols to prevent code corruption:
+1. **Logic-Lock**: Detection of `.map()`, ternaries, and conditional rendering to prevent visual editing of business logic.
+2. **Fuzzy Fingerprinting**: Deep-resolved structural IDs that can re-sync even if the developer manually adds code in the IDE.
+3. **Literal Priority**: Surgical patches are appended to the end of props to ensure they override any `{...props}` spreads.
+
+## 📦 Project Architecture
+
+- **`zenith-sidecar`**: The heartbeat of Zenith. A Rust engine handling the VFS, AST surgery, and Proxy management.
 - **`zenith-extension`**: The VS Code bridge, providing the Visual Canvas and IPC management.
 - **`zenith-vite-plugin`**: Real-time bridge for Vite projects, enabling seamless HMR-safe design.
-- **`zenith-next-plugin`**: Optimized support for Next.js and the modern web stack.
 
-## 📖 Getting Started
+## 🤝 Contributing
 
-1. **Install the Extension**: Search for "Zenith" in the VS Code Marketplace.
-2. **Open your Project**: Zenith automatically detects your dev server and framework.
-3. **Launch Canvas**: Click the **Zenith: Open Visual Canvas** icon in the editor toolbar.
-4. **Design Surgically**: Begin manipulating your UI visually; Zenith preserves your code structure perfectly.
+We welcome contributions from the Antigravity community! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed setup instructions for the Rust and TypeScript environments.
 
 ## ⚖️ License
 
-Zenith is an open-source project provided for non-profit, educational, and community use.
+Zenith is a community-first project. 
 
-**Commercial use of this software is strictly prohibited without explicit written permission from the maintainers.**
+**Strictly prohibited: Sales, commercial distribution, or for-profit usage without explicit written permission from the maintainers.**
 
 See [LICENSE.md](./LICENSE.md) for the full terms.
 
