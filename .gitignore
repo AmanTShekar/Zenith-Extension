@@ -17,6 +17,13 @@ _onlook_audit/
 Screenshot*.png
 SYNC_LAUNCH.bat
 DEPLOY_TO_GITHUB.ps1
+ZENITH_*.md
+rebuild.ps1
+setup_zenith.ps1
+test_harness.html
+space-scroll-demo/
+website/
+zenith.code-workspace
 
 # 🟡 User Metadata
 .env
