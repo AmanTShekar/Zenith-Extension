@@ -437,8 +437,46 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
         });
       };
       const tree = buildTree(document.body);
-      logToParent(`Tree built with ${tree.length} top-level nodes`);
       window.parent.postMessage({ type: 'zenithTreeUpdate', tree }, '*');
+    }
+
+    // v11.8: Autonomous Structural Audit (Collision & Alignment Detection)
+    if (event.data.type === 'zenithDeepAudit') {
+      logToParent("Starting Deep Structural Audit (Autonomous Mode)...");
+      const results = {
+        totalElements: 0,
+        trackedElements: 0,
+        collisions: [],
+        misalignments: [], // IDs that point to the wrong tag
+      };
+
+      const seenIds = new Set();
+      const all = document.querySelectorAll('*');
+      
+      all.forEach(el => {
+        const fiber = extractFiberMetadata(el);
+        if (fiber.name !== 'Unknown') results.totalElements++;
+
+        const zid = el.getAttribute('data-zenith-id');
+        if (zid) {
+          results.trackedElements++;
+          
+          // Collision Check
+          if (seenIds.has(zid)) {
+            results.collisions.push(zid);
+          }
+          seenIds.add(zid);
+
+          // Tag Alignment Check (e.g., filePath:section.0 should be a <section>)
+          const expectedTag = zid.split(':').pop()?.split('.')[0];
+          if (expectedTag && el.tagName.toLowerCase() !== expectedTag) {
+            results.misalignments.push({ id: zid, actual: el.tagName.toLowerCase(), expected: expectedTag });
+          }
+        }
+      });
+
+      logToParent(`Audit Complete: ${results.collisions.length} collisions, ${results.misalignments.length} misalignments`);
+      window.parent.postMessage({ type: 'zenithAuditResult', results }, '*');
     }
   });
 

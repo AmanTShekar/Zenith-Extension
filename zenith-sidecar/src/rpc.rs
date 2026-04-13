@@ -94,6 +94,9 @@ pub trait ZenithApi {
     #[method(name = "vfs.redo")]
     async fn redo(&self) -> RpcResult<bool>;
 
+    #[method(name = "vfs.heal")]
+    async fn heal_session(&self) -> RpcResult<bool>;
+
     #[method(name = "mock.set_override")]
     async fn set_mock_override(
         &self,
@@ -294,7 +297,20 @@ impl ZenithApiServer for ZenithRpc {
 
     async fn redo(&self) -> RpcResult<bool> {
         let mut vfs = self.state.vfs.write().await;
-        Ok(vfs.visual_redo().is_some())
+        Ok(vfs.redo().is_some())
+    }
+
+    async fn heal_session(&self) -> RpcResult<bool> {
+        tracing::info!("[RPC] vfs.heal requested");
+        let mut vfs = self.state.vfs.write().await;
+        let project_root = self.state.project_root.clone();
+        let zenith_dir = project_root.join(".zenith");
+        vfs.heal(&zenith_dir).map_err(|e| jsonrpsee::types::error::ErrorObject::owned(
+            jsonrpsee::types::error::ErrorCode::InternalError.code(),
+            format!("VFS Heal Failed: {}", e),
+            None::<()>,
+        ))?;
+        Ok(true)
     }
 
     async fn set_mock_override(&self, _id: ZenithId, _state: String, _val: String) -> RpcResult<bool> {

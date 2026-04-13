@@ -120,6 +120,77 @@ export const SurgicalDoctor: React.FC<{
     vscode.postMessage({ type: 'hardenWal' });
   };
 
+  const runDeepAudit = () => {
+    setIsFixing(true);
+    setResults(prev => prev.map(r => r.id === 'structural' ? { ...r, status: 'pending', message: 'Scanning DOM for collisions...' } : r));
+    vscode.postMessage({ type: 'runDeepAudit' });
+  };
+
+  const runHeal = () => {
+    setIsFixing(true);
+    vscode.postMessage({ type: 'healSession' });
+  };
+
+  useEffect(() => {
+    const handleAudit = (e: any) => {
+      const results = e.detail;
+      setIsFixing(false);
+      
+      setResults(prev => prev.map(r => {
+        if (r.id === 'structural') {
+          const hasIssues = results.collisions.length > 0 || results.misalignments.length > 0;
+          return {
+            ...r,
+            status: hasIssues ? 'fail' : 'ok',
+            message: `Audited ${results.trackedElements} elements. ${results.collisions.length} collisions found.`,
+            actionLabel: hasIssues ? 'Heal Structural Layers' : undefined,
+            id: 'structural'
+          };
+        }
+        return r;
+      }));
+    };
+
+    window.addEventListener('zenithAuditReceived', handleAudit);
+    return () => window.removeEventListener('zenithAuditReceived', handleAudit);
+  }, []);
+
+  useEffect(() => {
+    const handleHeal = (event: MessageEvent) => {
+      const message = event.data;
+      if (message.type === 'healResult') {
+        setIsFixing(false);
+        if (message.success) {
+           setResults(prev => prev.map(r => r.id === 'structural' ? { ...r, status: 'ok', message: 'System Healed. Structural alignment restored.', actionLabel: undefined } : r));
+        } else {
+           setResults(prev => prev.map(r => r.id === 'structural' ? { ...r, status: 'fail', message: `Healing failed: ${message.error}` } : r));
+        }
+      }
+    };
+    window.addEventListener('message', handleHeal);
+    return () => window.removeEventListener('message', handleHeal);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    // Auto-trigger deep audit on open
+    const initialResults = [
+        { id: 'sidecar', name: 'Engine Connection', status: 'pending', message: 'Checking Bridge...' },
+        { id: 'structural', name: 'Structural Audit', status: 'pending', message: 'Analyzing collisions...' },
+        { id: 'vfs', name: 'Surgical Persistence', status: 'pending', message: 'Auditing WAL...' },
+        { id: 'path', name: 'Path Integrity', status: 'pending', message: 'Verifying relative links...' }
+    ];
+    setResults(initialResults as any);
+    
+    setTimeout(runDeepAudit, 500);
+  }, [isOpen]);
+
+  const onResultAction = (id: string) => {
+    if (id === 'vfs') runHardening();
+    if (id === 'structural') runHeal();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -182,11 +253,11 @@ export const SurgicalDoctor: React.FC<{
                 </div>
                 {r.actionLabel && (
                    <button 
-                     onClick={r.id === 'vfs' ? runHardening : undefined}
+                     onClick={() => onResultAction(r.id)}
                      disabled={isFixing}
                      className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest hover:bg-white hover:text-black transition-all"
                    >
-                      {isFixing && r.id === 'vfs' ? 'Hardening...' : r.actionLabel}
+                      {isFixing && (r.id === 'vfs' || r.id === 'structural') ? 'Working...' : r.actionLabel}
                    </button>
                 )}
              </motion.div>

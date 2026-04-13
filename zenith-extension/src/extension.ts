@@ -260,7 +260,6 @@ export async function activate(context: vscode.ExtensionContext) {
                     return { type: 'Conflict', tx_id: txId };
                 }
 
-                handle.stagedCount++;
                 updateStatusBar(root);
                 broadcastToWebviews({
                     type: 'status',
@@ -271,6 +270,23 @@ export async function activate(context: vscode.ExtensionContext) {
                 return { ...result, tx_id: txId };
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Zenith Stage Failed: ${err.message || err}`);
+                throw err;
+            }
+        }),
+
+        vscode.commands.registerCommand('zenith.engine.heal', async () => {
+            const root = await resolveTargetWorkspace(true);
+            if (!root) return;
+            const handle = activeSidecars.get(root);
+            if (!handle) return;
+            try {
+                console.log(`[ZENITH-RPC] EXEC zenith.engine.heal`);
+                await handle.rpc.call('vfs.heal', []);
+                handle.stagedCount = 0; // Reset count
+                broadcastToWebviews({ type: 'status', connected: true, stagedCount: 0 });
+                vscode.window.showInformationMessage('Zenith: System Healed. Staging layer has been reset.');
+            } catch (err: any) {
+                vscode.window.showErrorMessage(`Healing failed: ${err.message}`);
                 throw err;
             }
         }),
@@ -1421,6 +1437,25 @@ async function handleWebviewMessage(
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Text edit failed: ${e.message}`, level: 'error' });
             }
+            return;
+
+        case 'healSession':
+            try {
+                if (!handle) throw new Error('Not connected to sidecar');
+                webview.postMessage({ type: 'log', text: `[EXT] Triggering Autonomous Heal RPC...`, level: 'warn' });
+                
+                await vscode.commands.executeCommand('zenith.engine.heal');
+                
+                webview.postMessage({ type: 'healResult', success: true });
+                webview.postMessage({ type: 'log', text: `System Healed: Staging layer reset.`, level: 'success' });
+            } catch (e: any) {
+                webview.postMessage({ type: 'healResult', success: false, error: e.message });
+            }
+            return;
+
+        case 'runDeepAudit':
+            // Logic to trigger the bridge scan
+            webview.postMessage({ type: 'bridge-msg', payload: { type: 'zenithDeepAudit' } });
             return;
 
         case 'patchStyle':

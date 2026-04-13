@@ -286,6 +286,28 @@ impl VirtualFileSystem {
         Ok(())
     }
 
+    /// Autonomous Heal: Clears all staging state and truncates the WAL.
+    /// v11.8: System Recovery Spine.
+    pub fn heal(&mut self, zenith_dir: &Path) -> Result<()> {
+        info!("[SIDECAR] VFS HEAL: Clearing all transactions and truncating WAL");
+        
+        // 1. Clear staging state
+        self.transactions.clear();
+        self.transaction_order.clear();
+        self.staged_intents.clear();
+        self.file_locks.clear();
+        
+        // 2. Clear merged caches (Force reload from disk base)
+        self.merged_cache.clear();
+        
+        // 3. Truncate WAL
+        if let Some(ref mut wal) = self.stage_wal {
+            wal.truncate()?;
+        }
+        
+        Ok(())
+    }
+
     /// Clear all in-memory merged caches to reclaim memory.
     pub fn clear_merged_cache(&mut self) {
         self.merged_cache.clear();

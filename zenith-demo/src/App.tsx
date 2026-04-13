@@ -27,7 +27,7 @@ function App() {
           <div
             className="status-pill"
             style={{
-              opacity: 0.56,
+              opacity: 1,
             }}
           >
             <div className="status-dot" />
@@ -69,8 +69,8 @@ function App() {
             onClick={() => setCount(count + 1)}
             className="btn-surgical"
             style={{
-              opacity: 0.29,
               fontFamily: "Roboto, sans-serif",
+              opacity: 1,
             }}
           >
             Counter: {count}

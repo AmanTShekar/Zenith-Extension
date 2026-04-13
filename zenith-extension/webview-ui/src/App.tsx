@@ -107,6 +107,11 @@ const App: React.FC = () => {
             vscode.postMessage(m);
             break;
 
+          case 'zenithAuditResult':
+            // v11.8: Bridge -> Doctor Audit result forwarding
+            window.dispatchEvent(new CustomEvent('zenithAuditReceived', { detail: m.results }));
+            break;
+
           case 'zenithSelect':
           case 'zenithSelectExtended':
             selectionActions.setSelected(
