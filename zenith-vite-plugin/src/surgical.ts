@@ -1,7 +1,7 @@
 import { parse, type ParserOptions } from "@babel/parser";
 import _traverse from "@babel/traverse";
-import _generate from "@babel/generator";
 import * as t from "@babel/types";
+import * as recast from "recast";
 
 // Handle ESM/CJS interop for Babel packages
 const traverse = (
@@ -10,11 +10,15 @@ const traverse = (
     : (_traverse as any).default
 ) as typeof _traverse;
 
-const generate = (
-  typeof _generate === "function"
-    ? _generate
-    : (_generate as any).default
-) as typeof _generate;
+const babelParser = {
+  parse: (code: string) => {
+    return parse(code, {
+      sourceType: "module",
+      plugins: PARSER_PLUGINS,
+      tokens: true, // Recast needs tokens
+    });
+  }
+};
 
 const PARSER_PLUGINS: ParserOptions["plugins"] = [
   "jsx",
@@ -48,6 +52,7 @@ export interface InsertDescriptor {
 
 export interface PatchInstructions {
   zenithId: string;
+  fingerprint?: string; // v11.7 Perfection: Used for self-healing if zenithId drift occurs
 
   // --- Style / attribute edits ---
   styles?: Record<string, string>;
@@ -132,15 +137,12 @@ function isInDynamicBlock(openingElementPath: any): boolean {
       }
     }
 
-    // Inside an arrow function that is a .map() callback
+    // v11.7.1 Mechanical Perfection: IIFE Logic-Lock
+    // If we are inside a function that is being called immediately, lock it.
     if (
-      t.isArrowFunctionExpression(path.node) &&
+      (t.isArrowFunctionExpression(path.node) || t.isFunctionExpression(path.node)) &&
       t.isCallExpression(parentNode) &&
-      t.isMemberExpression((parentNode as t.CallExpression).callee) &&
-      t.isIdentifier(
-        ((parentNode as t.CallExpression).callee as t.MemberExpression).property,
-        { name: "map" }
-      )
+      parentNode.callee === path.node
     ) {
       return true;
     }
@@ -156,10 +158,8 @@ function isInDynamicBlock(openingElementPath: any): boolean {
 // ---------------------------------------------------------------------------
 
 export function patchSourceFile(source: string, instructions: PatchInstructions): string {
-  const ast = parse(source, {
-    sourceType: "module",
-    plugins: PARSER_PLUGINS,
-    errorRecovery: true,
+  const ast = recast.parse(source, {
+    parser: babelParser,
   });
 
   // v9.8 Mechanical Perfection: Path-Based Resolution
@@ -220,14 +220,27 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
             } else if (t.isConditionalExpression(expr)) {
               if (findInExpr(expr.consequent)) return true;
               if (findInExpr(expr.alternate)) return true;
-            } else if (t.isCallExpression(expr) && t.isMemberExpression(expr.callee) && t.isIdentifier(expr.callee.property, { name: 'map' })) {
-              const callback = expr.arguments[0];
+            } else if (t.isCallExpression(expr)) {
+              // Handle .map() and IIFEs
+             const callback = t.isMemberExpression(expr.callee) && t.isIdentifier(expr.callee.property, { name: 'map' }) 
+                ? expr.arguments[0] 
+                : expr.callee;
+              
               if (t.isArrowFunctionExpression(callback) || t.isFunctionExpression(callback)) {
-                const body = (callback as any).body;
-                if (findInExpr(body)) return true;
+                if (findInExpr(callback.body)) return true;
               }
             } else if (t.isLogicalExpression(expr)) {
               if (findInExpr(expr.right)) return true;
+            } else if (t.isBlockStatement(expr)) {
+               // Descend into function blocks
+               for (const statement of expr.body) {
+                 if (findInExpr(statement)) return true;
+               }
+            } else if (t.isReturnStatement(expr)) {
+               return findInExpr(expr.argument);
+            } else if (t.isIfStatement(expr)) {
+               if (findInExpr(expr.consequent)) return true;
+               if (findInExpr(expr.alternate)) return true;
             }
             return false;
           };
@@ -261,28 +274,72 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
     }
   }
 
+  // v11.7.1 Mechanical Perfection: HOC Tunneling
+  // Recursive helper to find the JSX root through memo, forwardRef, etc.
+  function isComponentRoot(path: any, expectedTag: string): boolean {
+    const parent = path.parentPath.node;
+    
+    // If we're inside standard JSX, we're not a root
+    if (t.isJSXElement(path.parentPath.parent) || t.isJSXFragment(path.parentPath.parent)) {
+      return false;
+    }
+
+    const tagName = getTagName(path.node.name);
+    return tagName === expectedTag;
+  }
+
   // Find root and start matching
   (traverse as unknown as Function)(ast, {
     JSXOpeningElement(path: any) {
       if (targetPath) return;
-      const tagName = getTagName(path.node.name);
       const [rootTag, rootIdxStr] = selectorParts[0].split(".");
       
-      const parent = path.parentPath.parent;
-      // Root element is usually the one returned/exported, not nested in other JSX
-      if (!t.isJSXElement(parent) && !t.isJSXFragment(parent)) {
-        if (tagName === rootTag) {
-          matchPath(path, 1, false); // Start unlocked
-          if (targetPath) path.stop();
-        }
+      if (isComponentRoot(path, rootTag)) {
+          // Identify which "branch" (ReturnStatement) we are in to handle Multi-Return components
+          const parentPath = path.parentPath;
+          let returnIdx = 0;
+          if (t.isReturnStatement(parentPath.parent)) {
+            const funcBody = parentPath.findParent((p: any) => t.isBlockStatement(p.node));
+            if (funcBody) {
+              const siblings = (funcBody.node as any).body || [];
+              for (const sib of siblings) {
+                if (sib === parentPath.parent) break;
+                if (t.isReturnStatement(sib) || t.isIfStatement(sib)) returnIdx++;
+              }
+            }
+          }
+
+          const expectedIdx = parseInt(rootIdxStr, 10);
+          if (returnIdx === expectedIdx) {
+            matchPath(path, 1, false);
+            if (targetPath) path.stop();
+          }
       }
     }
   });
 
+  if (!targetPath && instructions.fingerprint) {
+    // v11.7 Perfection: Fuzzy matching — If structural ID fails, search by fingerprint
+    (traverse as unknown as Function)(ast, {
+      JSXOpeningElement(path: any) {
+        if (targetPath) return;
+        const attributes = path.node.attributes;
+        const fingerprintAttr = attributes.find(
+          (a: any) => t.isJSXAttribute(a) && t.isJSXIdentifier(a.name) && a.name.name === "data-zenith-fingerprint"
+        );
+        if (fingerprintAttr && t.isStringLiteral(fingerprintAttr.value) && fingerprintAttr.value.value === instructions.fingerprint) {
+          targetPath = path;
+          targetIsLocked = false; // Fingerprint matches are treated as valid targets
+          path.stop();
+        }
+      }
+    });
+  }
+
   if (!targetPath) {
     throw new Error(
       `Element "${instructions.zenithId}" not found in source. ` +
-      `The AST structure has shifted. Try re-loading the designer.`
+      (instructions.fingerprint ? `Fuzzy fingerprint search also failed.` : `The AST structure has shifted.`)
     );
   }
 
@@ -325,17 +382,8 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
     }
   }
 
-  const output = (generate as unknown as Function)(ast, {
-    retainLines: false, // v10.1: Disabled to prevent duplicate exports on Windows. Prettier handles formatting.
-    compact: false,
-    comments: true,
-    concise: false,
-    minified: false,
-    retainFunctionParens: true,
-    shouldPrintComment: () => true,
-  }, source);
-
-  return output.code;
+  const output = recast.print(ast).code;
+  return output;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,16 +393,18 @@ function updateAttribute(node: t.JSXOpeningElement, name: string, value: string)
   const idx = node.attributes.findIndex(
     (a) => t.isJSXAttribute(a) && t.isJSXIdentifier(a.name) && a.name.name === name
   );
-  
-  // v11.6: Hardening — If we are committing a design change, we overwrite 
-  // dynamic expressions with literals to ensure the VFS state reflects the designer's intent.
-  const attr = t.jsxAttribute(t.jsxIdentifier(name), t.stringLiteral(value));
+
+  // v11.7 Perfection: Support numeric literals for designer commits
+  const isNumeric = /^-?\d+(\.\d+)?$/.test(value);
+  const attr = t.jsxAttribute(
+    t.jsxIdentifier(name), 
+    isNumeric ? t.jsxExpressionContainer(t.numericLiteral(parseFloat(value))) : t.stringLiteral(value)
+  );
   
   if (idx !== -1) {
-    node.attributes[idx] = attr;
-  } else {
-    node.attributes.push(attr);
+    node.attributes.splice(idx, 1);
   }
+  node.attributes.push(attr);
 }
 
 // ---------------------------------------------------------------------------
@@ -365,53 +415,23 @@ function updateStyleAttribute(node: t.JSXOpeningElement, newStyles: Record<strin
     (a) => t.isJSXAttribute(a) && t.isJSXIdentifier(a.name) && a.name.name === "style"
   );
 
-  if (idx !== -1) {
-    const attr = node.attributes[idx] as t.JSXAttribute;
-
-    if (t.isJSXExpressionContainer(attr.value) && t.isObjectExpression(attr.value.expression)) {
-      const props = attr.value.expression.properties;
-      for (const [key, val] of Object.entries(newStyles)) {
-        const pi = props.findIndex(
-          (p) =>
-            t.isObjectProperty(p) &&
-            (t.isIdentifier(p.key, { name: key }) ||
-              (t.isStringLiteral(p.key) && p.key.value === key))
-        );
-
-        // v11.5: Numeric Literal Hardening — Use NumericLiteral if value is a valid code number
-        const isNumeric = /^-?\d+(\.\d+)?$/.test(val);
-        const newPropValue = isNumeric ? t.numericLiteral(parseFloat(val)) : t.stringLiteral(val);
-        const newProp = t.objectProperty(t.identifier(key), newPropValue);
-
-        if (pi !== -1) props[pi] = newProp;
-        else props.push(newProp);
-      }
-    } else {
-      // Replace entire style with new object
-      attr.value = t.jsxExpressionContainer(
-        t.objectExpression(
-          Object.entries(newStyles).map(([k, v]) => {
-             const isNumeric = /^-?\d+(\.\d+)?$/.test(v);
-             return t.objectProperty(t.identifier(k), isNumeric ? t.numericLiteral(parseFloat(v)) : t.stringLiteral(v));
-          })
-        )
-      );
-    }
-  } else {
-    node.attributes.push(
-      t.jsxAttribute(
-        t.jsxIdentifier("style"),
-        t.jsxExpressionContainer(
-          t.objectExpression(
-            Object.entries(newStyles).map(([k, v]) => {
-               const isNumeric = /^-?\d+(\.\d+)?$/.test(v);
-               return t.objectProperty(t.identifier(k), isNumeric ? t.numericLiteral(parseFloat(v)) : t.stringLiteral(v));
-            })
-          )
-        )
+  // v11.7 Perfection: Move style to the end to override spreads
+  const finalAttr = t.jsxAttribute(
+    t.jsxIdentifier("style"),
+    t.jsxExpressionContainer(
+      t.objectExpression(
+        Object.entries(newStyles).map(([k, v]) => {
+           const isNumeric = /^-?\d+(\.\d+)?$/.test(v);
+           return t.objectProperty(t.identifier(k), isNumeric ? t.numericLiteral(parseFloat(v)) : t.stringLiteral(v));
+        })
       )
-    );
+    )
+  );
+
+  if (idx !== -1) {
+    node.attributes.splice(idx, 1);
   }
+  node.attributes.push(finalAttr);
 }
 
 // ---------------------------------------------------------------------------
@@ -466,26 +486,30 @@ function createJSXElement(desc: InsertDescriptor): t.JSXElement {
 // Uses re-parse approach to avoid shared AST node references
 // ---------------------------------------------------------------------------
 function cloneJSXElement(el: t.JSXElement): t.JSXElement {
-  const tempCode = (generate as unknown as Function)(el, {}, "").code;
-  const tempAst = parse(`<>{${tempCode}}</>`, {
-    sourceType: "module",
-    plugins: ["jsx", "typescript"],
-    errorRecovery: true,
-  });
+  try {
+    const tempCode = recast.print(el).code;
+    const tempAst = parse(`<>{${tempCode}}</>`, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+      errorRecovery: true,
+    });
 
-  // Extract the JSX element from the expression statement
-  let found: t.JSXElement | null = null;
-  (traverse as unknown as Function)(tempAst, {
-    JSXElement(p: any) {
-      // Skip the outer fragment wrapper
-      if (!found && !t.isJSXFragment(p.parent)) {
-        found = p.node;
-        p.stop();
-      }
-    },
-  });
+    // Extract the JSX element from the expression statement
+    let found: t.JSXElement | null = null;
+    (traverse as unknown as Function)(tempAst, {
+      JSXElement(p: any) {
+        // Skip the outer fragment wrapper
+        if (!found && !t.isJSXFragment(p.parent)) {
+          found = p.node;
+          p.stop();
+        }
+      },
+    });
 
-  return found ?? el; // fallback to original if parse fails
+    return found ?? t.cloneNode(el, true); // fallback to cloneNode if parse fails
+  } catch (e) {
+    return t.cloneNode(el, true); // safety fallback
+  }
 }
 
 // ---------------------------------------------------------------------------

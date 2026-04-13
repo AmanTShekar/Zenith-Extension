@@ -216,11 +216,11 @@ async fn main() {
     let mut recovery_msg = None;
     let vfs = match VirtualFileSystem::recover_from_wal(&zenith_dir) {
         Ok(recovered) => {
-            let count = recovered.staged_intents.len();
+            let count = recovered.transactions.len();
             if count > 0 {
                 recovery_msg = Some(format!("Recovered {} staged changes from previous session", count));
             }
-            info!("[SIDECAR] Phase 3/6: WAL replayed — {} entries", count);
+            info!("[SIDECAR] Phase 3/6: WAL replayed — {} transactions", count);
             recovered
         }
         Err(zenith_sidecar::vfs::VfsError::WalNotFound) => {

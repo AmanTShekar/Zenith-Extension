@@ -137,16 +137,59 @@ export function injectGhostIds(
         return siblings.indexOf(parentElementPath.node);
       };
 
-      // v9.7 Mechanical Perfection: stable IDs via tag-sibling index
-      const getJSXElementIndex = (path: any): number => {
-        const jsxElementPath = path.isJSXOpeningElement() ? path.parentPath : path;
-        const siblings = (jsxElementPath.parentPath?.node as any)?.children || [];
-        let jsxIdx = 0;
-        for (const sib of siblings) {
-          if (sib === jsxElementPath.node) return jsxIdx;
-          if (t.isJSXElement(sib)) jsxIdx++;
+      // v11.7 Mechanical Perfection: Flattened indexing
+      // Fragments are treated as transparent containers. We count all JSXElements 
+      // in the flattened tree of the actual DOM-rendering parent.
+      // v11.7.1 Mechanical Perfection: Flattened & Branch-Aware indexing
+      const getJSXElementIndex = (targetPath: any): number => {
+        const p = targetPath.isJSXOpeningElement() ? targetPath.parentPath : targetPath;
+        
+        let parentPath = p.parentPath;
+        // If the immediate parent is a ReturnStatement, we are a "Root" of a branch.
+        // We calculate index based on the branch (ReturnStatement) position in the function.
+        if (t.isReturnStatement(parentPath?.node)) {
+            const funcBody = parentPath.findParent((p: any) => t.isBlockStatement(p.node));
+            if (funcBody) {
+                const siblings = (funcBody.node as any).body || [];
+                let returnIdx = 0;
+                for (const sib of siblings) {
+                    if (sib === parentPath.node) return returnIdx;
+                    // Count all statements that might contain a return or are a return
+                    // For simplicity, we just count ReturnStatements to keep the ID small.
+                    if (t.isReturnStatement(sib)) returnIdx++;
+                    else if (t.isIfStatement(sib)) {
+                        // Very complex: could descend. But usually one primary return per branch is enough.
+                        // We'll increment returnIdx for IfStatements to ensure separation.
+                        returnIdx++; 
+                    }
+                }
+            }
+            return 0;
         }
-        return 0;
+
+        // Standard JSX children indexing (with fragment flattening)
+        while (parentPath && t.isJSXFragment(parentPath.node)) {
+          parentPath = parentPath.parentPath;
+        }
+        if (!parentPath) return 0;
+        
+        const siblings = (parentPath.node as any).children || [];
+        let jsxIdx = 0;
+
+        const countFlattened = (nodes: any[]): boolean => {
+          for (const node of nodes) {
+            if (node === p.node) return true;
+            if (t.isJSXElement(node)) {
+              jsxIdx++;
+            } else if (t.isJSXFragment(node)) {
+              if (countFlattened(node.children)) return true;
+            }
+          }
+          return false;
+        };
+
+        countFlattened(siblings);
+        return jsxIdx;
       };
 
       let pathId = `${getTagName(node.name)}.${getJSXElementIndex(path)}`;
@@ -168,12 +211,37 @@ export function injectGhostIds(
       const ghostId = `${normalizedPath}:${pathId}`;
 
 
+      // --- Fingerprinting for Self-Healing ---
+      // v11.7.1 Perfection: Enriched Fingerprint (Tag | Classes | ChildTags | SiblingCount)
+      const staticClasses = node.attributes
+        .filter((attr: any) => t.isJSXAttribute(attr) && (attr.name as t.JSXIdentifier).name === "className" && t.isStringLiteral(attr.value))
+        .map((attr: any) => (attr.value as t.StringLiteral).value)
+        .join(" ");
+      
+      const parentNode = (path.parent as any);
+      const childFingerprint = parentNode.children
+        ?.filter((c: any) => t.isJSXElement(c))
+        .map((c: any) => getTagName(c.openingElement.name))
+        .slice(0, 3) // First 3 children for stability
+        .join(",");
+
+      const siblingCount = parentNode.children?.filter((c: any) => t.isJSXElement(c)).length ?? 0;
+      const attrCount = node.attributes.length;
+      const fingerprint = `${tagName}|${staticClasses}|${childFingerprint || ""}|s${siblingCount}|a${attrCount}`;
+
       // --- Inject attributes ---
       const ghostAttr = t.jsxAttribute(
         t.jsxIdentifier(attribute),
         t.stringLiteral(ghostId)
       );
       node.attributes.push(ghostAttr);
+
+      node.attributes.push(
+        t.jsxAttribute(
+          t.jsxIdentifier("data-zenith-fingerprint"),
+          t.stringLiteral(fingerprint)
+        )
+      );
 
       if (isInsideLogic) {
         node.attributes.push(

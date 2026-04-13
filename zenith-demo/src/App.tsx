@@ -28,22 +28,24 @@ function App() {
               opacity: "1",
               padding: "2rem",
               width: "500px",
-              textAlign: "center",
-              fontWeight: "",
-              color: "#ffffff",
+              paddingBottom: "0px",
+              paddingLeft: "0px",
+              paddingTop: "0px",
+              paddingRight: "0px",
+              textTransform: "uppercase",
             }}
           >
-            hi
+            hello
           </span>{" "}
           <span
             style={{
-              color: "#38bdf8",
+              color: "#1df8fc",
               fontFamily: "",
-              opacity: "0.92",
-              textAlign: "center",
+              opacity: "1",
+              textTransform: "uppercase",
             }}
           >
-            aman
+            editor
           </span>
         </h1>
 
@@ -76,9 +78,10 @@ function App() {
             style={{
               fontSize: "1.5rem",
               marginBottom: "12px",
+              textTransform: "uppercase",
             }}
           >
-            bye bye
+            hello
           </h2>
           <div
             style={{

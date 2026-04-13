@@ -127,7 +127,7 @@ pub struct VirtualFileSystem {
     base: im::HashMap<PathBuf, Arc<FileSnapshot>>,
 
     /// Overlay: pending patches per transaction.
-    transactions: HashMap<TransactionId, Vec<FilePatch>>,
+    pub transactions: HashMap<TransactionId, Vec<FilePatch>>,
 
     /// Merged cache: base + all active patches applied (COW overlay).
     merged_cache: im::HashMap<PathBuf, Arc<String>>,
@@ -157,6 +157,9 @@ pub struct VirtualFileSystem {
     /// Staged intents for conflict resolution (v3.8)
     pub staged_intents: HashMap<TransactionId, Vec<crate::conflict::ot_engine::MutationIntent>>,
 
+    /// Transaction arrival order for deterministic COW rebuilds (v11.7.4 Audit fix)
+    transaction_order: Vec<TransactionId>,
+
     /// Ghost-ID Registry for Base62 -> surgical position resolution (GR1 Fix)
     pub ghost_registry: GhostRegistry,
 }
@@ -182,8 +185,13 @@ impl VirtualFileSystem {
             view_mode: ViewMode::Shadow,
             stage_wal: None,
             staged_intents: HashMap::new(),
+            transaction_order: Vec::new(),
             ghost_registry: GhostRegistry::new(),
         }
+    }
+
+    pub fn active_transactions(&self) -> &HashMap<TransactionId, Vec<FilePatch>> {
+        &self.transactions
     }
 
     /// Create a new VFS with WAL persistence enabled.
@@ -206,6 +214,7 @@ impl VirtualFileSystem {
             view_mode: ViewMode::Shadow,
             stage_wal: Some(writer),
             staged_intents: HashMap::new(),
+            transaction_order: Vec::new(),
             ghost_registry: GhostRegistry::new(),
         })
     }
@@ -241,6 +250,9 @@ impl VirtualFileSystem {
                     // Replay without re-writing to WAL (it's already there)
                     let patch = FilePatch { file, edits };
                     vfs.transactions.entry(tx_id).or_default().push(patch.clone());
+                    if !vfs.transaction_order.contains(&tx_id) {
+                        vfs.transaction_order.push(tx_id);
+                    }
                     vfs.rebuild_merged_cache(&patch.file);
                     replayed += 1;
                 }
@@ -262,7 +274,9 @@ impl VirtualFileSystem {
     pub fn load_file(&mut self, path: PathBuf, content: String) {
         info!("[SIDECAR] VFS cache invalidated — file={:?}", path);
         self.merged_cache.remove(&path); // Invalidate cache on new load
-        self.base.insert(path, Arc::new(FileSnapshot::from_content(content)));
+        self.base.insert(path.clone(), Arc::new(FileSnapshot::from_content(content)));
+        // v11.7.4 Fix: Re-apply any pending patches to the new disk version
+        self.rebuild_merged_cache(&path);
     }
 
     /// Read file from physical disk and update VFS base layer.
@@ -381,7 +395,8 @@ impl VirtualFileSystem {
         info!("View mode switched to {:?}", mode);
     }
 
-    /// Stage a patch within a transaction.
+
+    /// Truncate the WAL (after a successful snapshot checkpoint).
     ///
     /// v2.6: WAL-first, then in-memory. Journaled before overlay mutation.
     pub fn stage(&mut self, tx: TransactionId, patch: FilePatch) {
@@ -398,11 +413,17 @@ impl VirtualFileSystem {
 
         let file = patch.file.clone();
         self.transactions.entry(tx).or_default().push(patch);
+
+        // v11.7.4 Audit: Track transaction arrival order
+        if !self.transaction_order.contains(&tx) {
+            self.transaction_order.push(tx);
+        }
+
         self.rebuild_merged_cache(&file);
     }
 
     /// Stage a high-level mutation intent (Surgical Mode).
-    /// Handles the transformation of intent -\u003e file patch.
+    /// Handles the transformation of intent -> file patch.
     /// 
     /// v3.8: Integrates OtEngine for real-time conflict detection.
     pub fn stage_mutation(
@@ -421,10 +442,50 @@ impl VirtualFileSystem {
                 match res {
                     TransformResult::NoConflict => continue,
                     TransformResult::HumanReview { .. } => return Ok((res, None)),
-                    TransformResult::AutoMerge { .. } => {
-                        // TODO: Implement complex multi-intent re-basing
-                        // For now, we favor the existing staged intent
-                    }
+                    TransformResult::AutoMerge { .. } => {}
+                }
+            }
+        }
+
+        // v3.14: Global Transaction Squashing (v11.7.3 Hardening)
+        // Scrubbing performance is critical. We scan ALL transactions for overlapping
+        // property changes to ensure the "Pending Changes" count remains 1 during drags.
+        let mut tx_to_cleanup = Vec::new();
+        for (other_tx, other_intents) in self.staged_intents.iter_mut() {
+            match &intent {
+                crate::conflict::ot_engine::MutationIntent::PropertyChange { element, property, .. } => {
+                    other_intents.retain(|i| {
+                        if let crate::conflict::ot_engine::MutationIntent::PropertyChange { element: e, property: p, .. } = i {
+                            !(e == element && p == property)
+                        } else {
+                            true
+                        }
+                    });
+                }
+                crate::conflict::ot_engine::MutationIntent::BatchPropertyChange { element, .. } => {
+                    other_intents.retain(|i| {
+                        if let crate::conflict::ot_engine::MutationIntent::BatchPropertyChange { element: e, .. } = i {
+                            e != element
+                        } else {
+                            true
+                        }
+                    });
+                }
+                _ => {}
+            }
+            if other_intents.is_empty() {
+                tx_to_cleanup.push(*other_tx);
+            }
+        }
+        
+        // Remove empty transactions to keep the ledger clean
+        for tx_id in tx_to_cleanup {
+            self.staged_intents.remove(&tx_id);
+            self.transaction_order.retain(|id| id != &tx_id);
+            if let Some(patches) = self.transactions.remove(&tx_id) {
+                // v11.7.4 Audit: If we removed a transaction, rebuild cache for its files
+                for patch in patches {
+                    self.rebuild_merged_cache(&patch.file);
                 }
             }
         }
@@ -811,7 +872,7 @@ impl VirtualFileSystem {
     /// Cost: ~1-10ms on SSD. NOT called on scrub ticks.
     pub fn sync_wal(&mut self) -> Result<()> {
         if let Some(ref mut wal) = self.stage_wal {
-            wal.sync()
+            wal.sync_all()
                 .map_err(|e| anyhow::anyhow!("WAL fdatasync failed: {}", e))?;
         }
         Ok(())
@@ -834,9 +895,10 @@ impl VirtualFileSystem {
     /// Check if all pending transactions are drafts (Issue 35).
     pub fn all_transactions_are_drafts(&self) -> bool {
         if self.transactions.is_empty() {
-            return false;
+            false
+        } else {
+            self.transactions.keys().all(|tx| self.is_draft(*tx))
         }
-        self.transactions.keys().all(|tx| self.is_draft(*tx))
     }
 
     /// Stage a patch and create an undo frame.
@@ -997,12 +1059,14 @@ impl VirtualFileSystem {
             None => return,
         };
 
-        // Collect all edits across all transactions for this file
+        // v11.7.4 Audit: Use deterministic arrival order for mutation replay
         let mut all_edits = Vec::new();
-        for patches in self.transactions.values() {
-            for patch in patches {
-                if patch.file == file {
-                    all_edits.extend(patch.edits.clone());
+        for tx_id in &self.transaction_order {
+            if let Some(patches) = self.transactions.get(tx_id) {
+                for patch in patches {
+                    if patch.file == file {
+                        all_edits.extend(patch.edits.clone());
+                    }
                 }
             }
         }
@@ -1295,7 +1359,6 @@ fn apply_edits(source: &str, edits: &[TextEdit]) -> Result<String> {
             // Multi-line edit
             let first_line = &lines[sl];
             let before = &first_line[..edit.start_col.min(first_line.len() as u32) as usize];
-            
             let after = if el < lines.len() {
                 let last_line = &lines[el];
                 &last_line[edit.end_col.min(last_line.len() as u32) as usize..]
