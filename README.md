@@ -10,6 +10,14 @@ You no longer have to blindly guess padding sizes or CSS classes. Just point, cl
 
 ---
 
+## 📺 Watch Zenith in Action
+
+[![Zenith Demo Video](https://img.shields.io/badge/Watch%20Demo-Zenith%20Action-blueviolet?style=for-the-badge&logo=youtube)](https://github.com/AmanTShekar/Zenith-Extension)
+
+*Check out how Zenith surgically modifies code and provides a real-time design experience.*
+
+---
+
 ## 🛠️ What are we doing?
 
 We are bridging the gap between **Static Code** and **Dynamic Design**. Traditionally, developers write code and "guess" how it will look. Designers draw pictures and "hope" they can be turned into code. Zenith deletes that friction. 
@@ -50,7 +58,9 @@ Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information o
 
 ## 📜 License
 
-Zenith is licensed under the **[MIT License](LICENSE)**. Build, change, and create freely.
+Zenith is licensed under the **[Apache License 2.0](LICENSE)**. Build, change, and create freely. 
+
+*Our Apache licensing provides a robust legal framework, covering both copyright and patent protections for users and contributors.*
 
 ## 🎨 Creator
 
