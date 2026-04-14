@@ -1,8 +1,8 @@
-# 🌌 Zenith Visual Studio Hub
+# Zenith Visual Studio Hub
 
 Welcome to **Zenith Visual Studio Hub**! Zenith is an incredibly powerful, visual development companion that lives right inside your VS Code Editor. Imagine bringing the best visual design tools like Photoshop or Figma straight into your codebase, allowing you to build and design your beautiful React apps visually—without ever leaving your code.
 
-## 🚀 What is Zenith?
+## What is Zenith?
 
 Zenith lets you click on your application's UI, change text, adjust designs, and rearrange objects in a visual setup, all while it **automatically writes the perfect React code for you in your source files** in real-time. 
 
@@ -10,7 +10,7 @@ You no longer have to blindly guess padding sizes or CSS classes. Just point, cl
 
 ---
 
-## 📺 Watch Zenith in Action
+## Watch Zenith in Action
 
 [![Zenith Demo Video](https://img.shields.io/badge/Watch%20Demo-Zenith%20Action-blueviolet?style=for-the-badge&logo=youtube)](https://github.com/AmanTShekar/Zenith-Extension)
 
@@ -18,7 +18,7 @@ You no longer have to blindly guess padding sizes or CSS classes. Just point, cl
 
 ---
 
-## 🛠️ What are we doing?
+## What are we doing?
 
 We are bridging the gap between **Static Code** and **Dynamic Design**. Traditionally, developers write code and "guess" how it will look. Designers draw pictures and "hope" they can be turned into code. Zenith deletes that friction. 
 
@@ -26,11 +26,11 @@ By injecting a "Live Bridge" into your development server, we turn your running 
 
 ---
 
-## ⚙️ Technical Architecture
+## Technical Architecture
 
 Zenith is built on three main pillars designed for speed and reliability:
 
-### 1. The Sidecar Engine (Rust 🦀)
+### 1. The Sidecar Engine (Rust)
 The brain of Zenith. It manages a **Virtual File System (VFS)** and a **Write-Ahead Log (WAL)**. It ensures that every visual change is atomic and safe. By using Rust, we keep latency under 1ms, ensuring your design experience feels "instant."
 
 ### 2. Surgical AST Patcher
@@ -41,7 +41,7 @@ A lightweight injector that lives inside your Vite development server. It maps y
 
 ---
 
-### ✨ Core Features
+### Core Features
 
 * **Visual Canvas Editing**: Drag to resize, swap colors, and fine-tune your website visually.
 * **Photoshop-Style Layers Tree**: View your entire app hierarchy, with instant hover-sync between the tree and the canvas.
@@ -50,13 +50,13 @@ A lightweight injector that lives inside your Vite development server. It maps y
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request. 
 
 Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information on how to get started.
 
-## 📜 License
+## License
 
 Zenith is licensed under the **[Apache License 2.0](LICENSE)**. Build, change, and create freely. 
 
