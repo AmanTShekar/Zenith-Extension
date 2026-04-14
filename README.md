@@ -1,4 +1,4 @@
-# Zenith Surgical Engine v11.7.6
+# Zenith Extension  -Design To Code
 ### Senior-Architect Technical Manual & Formal Specification
 
 Zenith is a **Surgical Design OS** for modern web applications. Unlike traditional design tools that treat code as a secondary output, Zenith treats the source code AST as a live, observable artboard. It uses a non-destructive, AST-based mutation engine to transform visual design intents into atomic source code patches with zero logic drift.
