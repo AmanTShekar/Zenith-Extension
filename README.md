@@ -44,15 +44,17 @@ A lightweight injector that lives inside your Vite development server. It maps y
 
 ## 🤝 Contributing
 
-We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request.
+We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request. 
+
+Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information on how to get started.
 
 ## 📜 License
 
-Zenith is licensed under the **MIT License**. Build, change, and create freely.
+Zenith is licensed under the **[MIT License](LICENSE)**. Build, change, and create freely.
 
 ## 🎨 Creator
 
-Created with ❤️ by **Aman T Shekar**.
+Created with ❤️ by **[Aman T Shekar](https://github.com/AmanTShekar)**.
 
 ---
 *Ready to build visually? Launch Zenith inside your workspace and start pointing, clicking, and building!*
