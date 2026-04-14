@@ -1,103 +1,48 @@
-# Zenith Extension - Design To Code
-### Senior-Architect Technical Manual & Formal Specification
+# 🌌 Zenith Visual Studio Hub
 
-Zenith is a **Surgical Design OS** for modern web applications. Unlike traditional design tools that treat code as a secondary output, Zenith treats the source code AST as a live, observable artboard. It uses a non-destructive, AST-based mutation engine to transform visual design intents into atomic source code patches with zero logic drift.
+Welcome to **Zenith Visual Studio Hub**! Zenith is an incredibly powerful, visual development companion that lives right inside your VS Code Editor. Imagine bringing the best visual design tools like Photoshop or Figma straight into your codebase, allowing you to build and design your beautiful React apps visually—without ever leaving your code.
 
----
+## 🚀 What is Zenith?
 
-## 🚀 Core Performance Specifications
+Zenith lets you click on your application's UI, change text, adjust designs, and rearrange objects in a visual setup, all while it **automatically writes the perfect React code for you in your source files** in real-time. 
 
-| Metric | Target | Actual (v11.7.6) | Mechanism |
-| :--- | :--- | :--- | :--- |
-| **Hot-Path Latency** | < 1.0ms | **< 0.45ms** | SAB Ring Buffer (Shared Memory) |
-| **Cold-Boot Indexing** | < 1000ms | **~15ms** | MessagePack Incremental Snapshotting |
-| **Mutation Integrity** | 100% | **100%** | Babel-Recast Surgical AST Transform |
-| **Persistence Latency** | < 5ms | **~2ms** | WAL-backed In-Place Truncation |
+You no longer have to blindly guess padding sizes or CSS classes. Just point, click, type, and watch the actual code write itself.
 
----
+### ✨ Core Features
 
-## 🧠 System Architecture
+* **Visual Canvas Editing**: Click any element on your screen to select it. Drag to resize, swap colors, adjust margins, and fine-tune your website visually.
+* **Beautiful Layers Panel**: Just like in Photoshop, you can view your entire application's layout as a tree. Hover to magically highlight the components on the screen, or instantly toggle the "Eye" and "Lock" icons to hide or isolate elements.
+* **Auto-Committing Magic**: Want to change some text? Double-click it on the screen, type the new word, and press Enter. Zenith seamlessly grabs that new text and permanently saves it inside your React source code.
+* **Real-Time Undo & Redo (Time Travel)**: Made a mistake? Since Zenith is seamlessly wired into your VS Code history, you can just press `Ctrl+Z` (or `Cmd+Z`) and both the code and the screen will flawlessly rewind back to the previous state.
+* **Intelligent and Non-Destructive**: Zenith edits exactly the UI pieces you tell it to without breaking any of the logical JavaScript loops or mapping functions you've built inside your code.
 
-Zenith is composed of three decoupled layers synchronized via a high-velocity binary bridge:
+## 🛠️ How it works
 
-1.  **Sidecar Engine (Rust)**: The source-of-truth. Manages the VFS, WAL, and JSON-RPC command plane.
-2.  **Ghost-Runtime (TypeScript/Vite)**: Injects stable `data-zenith-id` markers into the DOM without altering business logic.
-3.  **Surgical Patcher (Node.js/Babel)**: Executes atomic AST transformations using structural path-based resolution.
+Zenith uses a lightweight combination of tools to achieve this magic:
+1. **VS Code Extension**: This is the visual dashboard (or "Hub") that adds all of the design tools to your editor sidebars.
+2. **Sidecar Engine**: An ultra-fast background process that acts like a bridge ensuring changes to elements hit exactly the correct line of code.
+3. **Vite Plugin**: Connects the visual elements inside your running browser preview directly to Zenith.
 
-### 1. Memory-Mapped IPC (SAB Protocol)
-The "Hot-Path" for scrubbing (e.g., real-time color/width dragging) bypasses the WebSocket stack entirely. It uses a **SharedArrayBuffer** ring buffer.
+## 💡 Why use Zenith?
 
-#### **Binary Slot Layout (128-byte Partition)**:
-```text
-[0-7]   : Atomic Sequence Number (Gating)
-[8-15]  : Message Type (0x01: Hover, 0x02: Scrub, 0x03: Select)
-[16-31] : Ghost-ID Hash (FNV-1a 64-bit)
-[32-39] : Value Float/Int
-[40-127]: Velocity Hint + Reserved Metadata
-```
-*   **Collision Mitigation**: FNV-1a hashing ensures O(1) attribute lookup with collision resistance for up to 10k unique IDs per view.
-*   **UI Debouncing**: Velocity hints allow the extension to drop intermediate frames during hyper-fast designer movements, preserving CPU for AST operations.
+Developing beautiful user interfaces should not involve reloading your browser 100 times to see if `padding-top: 15px` looks better than `14px`. Zenith gives you the creative freedom of a professional design suite baked directly into the exact spot where your code lives. 
 
----
+* *For Designers*: Edit UI directly in a real functional application.
+* *For Developers*: Let Zenith write boring CSS and positioning syntax while you focus on the app logic.
 
-## 🗡️ The Surgical Mutation Engine
+## 🤝 Contributing
 
-Zenith uses "Surgical Mutation" rather than string manipulation. This ensures that comments, formatting, and—most importantly—business logic are never corrupted.
+We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request or start a discussion. We aim to keep Zenith the fastest way to build the web.
 
-### Logic-Locking (Safety First)
-To prevent the engine from overwriting critical logic, the patcher implements **Logic-Locking**. It forbids mutations within "Dynamic Zones":
-*   **Iterators**: Direct children of `.map()` or `.filter()`.
-*   **Conditionals**: Elements inside ternary expressions (`? :`) or logical operators (`&&`).
-*   **Dynamic Hooks**: IIFEs and immediately invoked arrow functions.
+## 📜 License
 
-> [!TIP]
-> Elements in Dynamic Zones are marked as "Logic Locked" in the UI. Modifications must be made in the source code directly to maintain data integrity.
+Zenith is licensed under the **MIT License**. Build, change, and create freely.
 
-### Structural Path Resolution
-Ghost IDs are stable strings (e.g., `zenith:div.0:p.2`) derived from the AST hierarchy.
-*   **Self-Healing**: v11.7 introduced **Fingerprint-Fuzzy Matching**. If a developer manually adds an element, Zenith calculates a fuzzy fingerprint (tag + attributes) to re-align the Ghost-ID map without requiring a full re-scan.
+## 🎨 Creator
+
+Created with ❤️ by **Aman T Shekar**. 
+
+Join us in pushing the boundaries of how software is designed and built.
 
 ---
-
-## 📜 Virtual File System (VFS) & WAL
-
-The VFS uses **Copy-on-Write (COW)** overlays via functional data structures (`im::HashMap`).
-
-### Two-Phase Commit (2PC)
-1.  **Stage**: Mutation intent is validated against logic locks and appended to the `stage.wal`.
-2.  **Commit**: The staged overlay is merged into the base layer, and physical file writes are executed atomically.
-
-### Windows Persistence Hardening (v11.7.6 Fix)
-To bypass Windows `OS Error 5 (Access Denied)` during WAL cleanup:
-*   Zenith maintains a long-lived file handle to `stage.wal`.
-*   Cleanup is performed via **In-Place Truncation**: `set_len(0)` followed by `seek(0)`.
-*   This prevents race-conditions with Windows Indexer/AV services that occur when files are dropped and recreated.
-
----
-
-## 📡 JSON-RPC API Reference (Command Plane)
-
-The WebSocket control plane (default port: `8082`) handles administrative and structural tasks.
-
-| Method | Params | Description |
-| :--- | :--- | :--- |
-| `element.select` | `id: ZenithId` | Activates inspector focus for a specific Ghost-ID. |
-| `zenith.engine.stage` | `tx: UUID, intent: Mutation` | Appends a design mutation to the WAL. |
-| `vfs.commit` | `void` | Finalizes all staged transactions to the disk. |
-| `vfs.undo` / `redo` | `void` | Steps through the visual transaction stack. |
-| `auditor.check` | `styles: Map` | Returns a contrast/accessibility score report. |
-| `zenith.sandbox.start` | `target: u16, listen: u16` | Orchestrates a development proxy latch. |
-
----
-
-## 🛠️ Operational Maintenance
-
-### The Ghost Index
-If startup time exceeds 500ms, the Sidecar automatically shifts to **Incremental Indexing**.
-*   **Location**: `.zenith/index.msgpack`
-*   **Validation**: The index is verified against the filesystem checksum. If `mtime` mismatch is detected, a background "Cold Scan" is triggered.
-
-### Conflict Resolution (OT Engine)
-Zenith implements an **Intention-Preserving Operational Transform (OT)** engine. If two designers (or a designer and a developer) modify the same element:
-1.  **Attribute Conflict**: Last-Write-Wins (LWW) based on NTP-coordinated timestamps.
-2.  **Structural Conflict**: Transform operations are "re-based" against the new AST root to maintain hierarchical validity.
+*Ready to build visually? Launch Zenith inside your workspace and start pointing, clicking, and building!*
