@@ -8,31 +8,43 @@ Zenith lets you click on your application's UI, change text, adjust designs, and
 
 You no longer have to blindly guess padding sizes or CSS classes. Just point, click, type, and watch the actual code write itself.
 
+---
+
+## 🛠️ What are we doing?
+
+We are bridging the gap between **Static Code** and **Dynamic Design**. Traditionally, developers write code and "guess" how it will look. Designers draw pictures and "hope" they can be turned into code. Zenith deletes that friction. 
+
+By injecting a "Live Bridge" into your development server, we turn your running app into a surgical artboard. When you move a button or change a font size in the Zenith Hub, we don't just "mock" it—we surgically reach into your source files and update the underlying code using advanced AST (Abstract Syntax Tree) transformations.
+
+---
+
+## ⚙️ Technical Architecture
+
+Zenith is built on three main pillars designed for speed and reliability:
+
+### 1. The Sidecar Engine (Rust 🦀)
+The brain of Zenith. It manages a **Virtual File System (VFS)** and a **Write-Ahead Log (WAL)**. It ensures that every visual change is atomic and safe. By using Rust, we keep latency under 1ms, ensuring your design experience feels "instant."
+
+### 2. Surgical AST Patcher
+Unlike other "site builders" that use messy string replacements, Zenith uses a **Surgical Mutation Engine**. It parses your TypeScript/JSX code into a tree structure (AST), finds the exact component you clicked on, and updates only the specific property you changed. This preserves your logic, comments, and project structure perfectly.
+
+### 3. The Runtime Bridge
+A lightweight injector that lives inside your Vite development server. It maps your browser's DOM elements back to their exact source code locations using unique "Zenith IDs," allowing for sub-pixel precision when selecting or designing.
+
+---
+
 ### ✨ Core Features
 
-* **Visual Canvas Editing**: Click any element on your screen to select it. Drag to resize, swap colors, adjust margins, and fine-tune your website visually.
-* **Beautiful Layers Panel**: Just like in Photoshop, you can view your entire application's layout as a tree. Hover to magically highlight the components on the screen, or instantly toggle the "Eye" and "Lock" icons to hide or isolate elements.
-* **Auto-Committing Magic**: Want to change some text? Double-click it on the screen, type the new word, and press Enter. Zenith seamlessly grabs that new text and permanently saves it inside your React source code.
-* **Real-Time Undo & Redo (Time Travel)**: Made a mistake? Since Zenith is seamlessly wired into your VS Code history, you can just press `Ctrl+Z` (or `Cmd+Z`) and both the code and the screen will flawlessly rewind back to the previous state.
-* **Intelligent and Non-Destructive**: Zenith edits exactly the UI pieces you tell it to without breaking any of the logical JavaScript loops or mapping functions you've built inside your code.
+* **Visual Canvas Editing**: Drag to resize, swap colors, and fine-tune your website visually.
+* **Photoshop-Style Layers Tree**: View your entire app hierarchy, with instant hover-sync between the tree and the canvas.
+* **Auto-Committing Engine**: Double-click text to edit, and watch it save directly to your source files.
+* **Unified History Stack**: Use `Ctrl+Z` to undo both code changes and visual designs in one go.
 
-## 🛠️ How it works
-
-Zenith uses a lightweight combination of tools to achieve this magic:
-1. **VS Code Extension**: This is the visual dashboard (or "Hub") that adds all of the design tools to your editor sidebars.
-2. **Sidecar Engine**: An ultra-fast background process that acts like a bridge ensuring changes to elements hit exactly the correct line of code.
-3. **Vite Plugin**: Connects the visual elements inside your running browser preview directly to Zenith.
-
-## 💡 Why use Zenith?
-
-Developing beautiful user interfaces should not involve reloading your browser 100 times to see if `padding-top: 15px` looks better than `14px`. Zenith gives you the creative freedom of a professional design suite baked directly into the exact spot where your code lives. 
-
-* *For Designers*: Edit UI directly in a real functional application.
-* *For Developers*: Let Zenith write boring CSS and positioning syntax while you focus on the app logic.
+---
 
 ## 🤝 Contributing
 
-We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request or start a discussion. We aim to keep Zenith the fastest way to build the web.
+We love builders! If you have ideas for new visual tools, performance improvements, or bug fixes, feel free to open a Pull Request.
 
 ## 📜 License
 
@@ -40,9 +52,7 @@ Zenith is licensed under the **MIT License**. Build, change, and create freely.
 
 ## 🎨 Creator
 
-Created with ❤️ by **Aman T Shekar**. 
-
-Join us in pushing the boundaries of how software is designed and built.
+Created with ❤️ by **Aman T Shekar**.
 
 ---
 *Ready to build visually? Launch Zenith inside your workspace and start pointing, clicking, and building!*
