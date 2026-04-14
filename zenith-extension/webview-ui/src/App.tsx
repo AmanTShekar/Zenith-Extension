@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { vscode } from './bridge';
-import { clsx } from 'clsx';
 import { 
   useSelectionStore, 
   useCanvasStore, 
   useExplorerStore, 
   useSystemStore, 
-  useLogStore, 
-  normalizeStyles 
+  useLogStore 
 } from './stores';
 import { Toolbar } from './components/Toolbar';
 import { LeftSidebar } from './components/sidebar/LeftSidebar';
@@ -56,6 +54,9 @@ const App: React.FC = () => {
             if (m.stagedCount !== undefined) {
                selectionActions.setStagedCount(m.stagedCount);
             }
+            if (m.latency !== undefined) {
+               systemActions.setLatency(m.latency);
+            }
             break;
 
           case 'projectInfo':
@@ -94,6 +95,8 @@ const App: React.FC = () => {
           }
           case 'zenithTreeUpdate':
             explorerActions.setTree(m.tree || []);
+            // v12.2 Sync: Forward tree to extension so Sidebar can pick it up
+            vscode.postMessage(m);
             break;
 
           case 'log':
@@ -131,7 +134,6 @@ const App: React.FC = () => {
           case 'zenithHover':
             selectionActions.setHover(m.rect, m.tagName);
             break;
-
           case 'zenithHoverClear':
             selectionActions.setHover(null);
             break;
@@ -160,11 +162,34 @@ const App: React.FC = () => {
             break;
 
 
+          case 'zenithPresence':
+            // v11.9: Auto-trigger hierarchy build on first presence if tree is offline
+            if (useExplorerStore.getState().tree.length === 0) {
+              vscode.postMessage({ type: 'zenithRequestTree' });
+            }
+            break;
+
           case 'requestSelect': {
             // v11.0 Hardening: Sidebar -> Canvas selection bridge
             const canvasIframes = document.querySelectorAll('iframe');
             canvasIframes.forEach(iframe => {
               iframe.contentWindow?.postMessage({ type: 'zenithForceSelect', id: m.zenithId }, '*');
+            });
+            break;
+          }
+
+          case 'requestHover': {
+            const canvasIframes = document.querySelectorAll('iframe');
+            canvasIframes.forEach(iframe => {
+              iframe.contentWindow?.postMessage({ type: 'zenithForceHover', id: m.zenithId }, '*');
+            });
+            break;
+          }
+
+          case 'requestHoverClear': {
+            const canvasIframes = document.querySelectorAll('iframe');
+            canvasIframes.forEach(iframe => {
+              iframe.contentWindow?.postMessage({ type: 'zenithHoverClear' }, '*');
             });
             break;
           }
@@ -181,8 +206,11 @@ const App: React.FC = () => {
       const cmd = isMac ? e.metaKey : e.ctrlKey;
       
       if (cmd && e.key.toLowerCase() === 'z') {
-        if (e.shiftKey) selectionActions.redo();
-        else selectionActions.undo();
+        if (e.shiftKey) {
+          vscode.postMessage({ type: 'redo' });
+        } else {
+          vscode.postMessage({ type: 'undo' });
+        }
         e.preventDefault();
       }
 
@@ -209,7 +237,7 @@ const App: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [systemActions, logActions, selectionActions, explorerActions, canvasActions]);
 
   return (
     <div className="flex flex-col h-screen bg-black text-text-primary overflow-hidden selection:bg-accent/10">
@@ -239,7 +267,6 @@ const App: React.FC = () => {
                 vscode.postMessage({ type: 'setDevServerUrl', url });
               }}
               onStart={() => setView('canvas')}
-              onPopOut={() => vscode.postMessage({ type: 'popOut' })}
             />
           </div>
         ) : (

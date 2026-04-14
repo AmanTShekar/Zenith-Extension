@@ -1,7 +1,7 @@
 const toCamelCase = (str: string) => str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
 
 export const normalizeStyles = (styles: Record<string, string>) => {
-  const normalized: Record<string, any> = {};
+  const normalized: Record<string, string | number> = {};
   Object.entries(styles).forEach(([key, val]) => {
     const camelKey = toCamelCase(key);
     normalized[camelKey] = val;

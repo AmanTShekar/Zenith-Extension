@@ -87,15 +87,15 @@ export function Toolbar({
 
       {/* Main Creative Tools (Merged from FloatingToolbar) */}
       <div className="flex items-center gap-1 px-2 border-r border-white/5">
-        {[
+        {( [
           { id: 'select', icon: 'ph-cursor', label: 'Select (V)' },
           { id: 'hand',   icon: 'ph-hand-grabbing', label: 'Hand (H)' },
           { id: 'text',   icon: 'ph-text-t', label: 'Text (T)' },
           { id: 'insert', icon: 'ph-plus-circle', label: 'Insert (I)' },
-        ].map((tool) => (
+        ] as const).map((tool) => (
           <button
             key={tool.id}
-            onClick={() => setTool(tool.id as any)}
+            onClick={() => setTool(tool.id)}
             title={tool.label}
             className={clsx(
               "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
@@ -112,22 +112,22 @@ export function Toolbar({
       {/* History Controls (Undo/Redo) */}
       <div className="flex items-center gap-0.5 px-2 border-r border-white/5">
           <button 
-              onClick={undo}
-              disabled={!canUndo}
-              className={clsx(
-                "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
-                canUndo ? "text-text-secondary hover:text-white hover:bg-white/5" : "text-white/5"
-              )}
+              onClick={() => {
+                  vscode.postMessage({ type: 'undo' });
+                  useSelectionStore.getState().actions.undo(); // Execute local unpatching too
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all text-text-secondary hover:text-white hover:bg-white/5"
+              title="Undo (Ctrl+Z)"
           >
               <i className="ph ph-arrow-u-up-left" />
           </button>
           <button 
-              onClick={redo}
-              disabled={!canRedo}
-              className={clsx(
-                "w-8 h-8 flex items-center justify-center rounded-lg transition-all",
-                canRedo ? "text-text-secondary hover:text-white hover:bg-white/5" : "text-white/5"
-              )}
+              onClick={() => {
+                  vscode.postMessage({ type: 'redo' });
+                  useSelectionStore.getState().actions.redo();
+              }}
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all text-text-secondary hover:text-white hover:bg-white/5"
+              title="Redo (Shift+Ctrl+Z)"
           >
               <i className="ph ph-arrow-u-up-right" />
           </button>

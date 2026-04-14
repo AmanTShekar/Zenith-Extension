@@ -226,7 +226,12 @@ impl GhostProxyServer {
             let handler_clone = handler.clone();
             tokio::spawn(async move {
                 if let Err(e) = Self::handle_client(stream, handler_clone).await {
-                    error!("Proxy client error: {}", e);
+                    let err_msg = e.to_string();
+                    if err_msg.contains("Broken pipe") || err_msg.contains("pipe is being closed") {
+                        debug!("Proxy client disconnected (normal)");
+                    } else {
+                        error!("Proxy client error: {}", e);
+                    }
                 }
             });
         }

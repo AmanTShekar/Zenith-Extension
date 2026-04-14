@@ -7,11 +7,13 @@ import { vscode } from '../../bridge';
 // Context Menu
 // ---------------------------------------------------------------------------
 
-interface ContextMenuProps {
-  x: number;
-  y: number;
-  node: TreeNode;
-  onClose: () => void;
+interface MenuItem {
+  label?: string;
+  icon?: string;
+  action?: () => void;
+  shortcut?: string;
+  danger?: boolean;
+  type?: 'divider';
 }
 
 function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
@@ -32,7 +34,7 @@ function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
     onClose();
   };
 
-  const menuItems = [
+  const menuItems: MenuItem[] = [
     {
       label: 'Select',
       icon: 'ph-cursor',
@@ -41,7 +43,7 @@ function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
         onClose();
       },
     },
-    { type: 'divider' as const },
+    { type: 'divider' },
     {
       label: 'Duplicate',
       icon: 'ph-copy',
@@ -66,7 +68,7 @@ function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
         payload: { tagName: 'div', textContent: '', attributes: {}, position: { type: 'append' } },
       }),
     },
-    { type: 'divider' as const },
+    { type: 'divider' },
     {
       label: 'Move Up',
       icon: 'ph-arrow-up',
@@ -77,7 +79,7 @@ function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
       icon: 'ph-arrow-down',
       action: () => send('structuralOperation', { operation: 'moveDown' }),
     },
-    { type: 'divider' as const },
+    { type: 'divider' },
     {
       label: 'Delete Element',
       icon: 'ph-trash',
@@ -136,6 +138,8 @@ function ContextMenu({ x, y, node, onClose }: ContextMenuProps) {
 export function LayersPanel() {
   const { tree, expandedIds, actions } = useExplorerStore();
   const selectedId = useSelectionStore(state => state.selectedId);
+  const hiddenIds = useExplorerStore(state => state.hiddenIds);
+  const lockedIds = useExplorerStore(state => state.lockedIds);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null);
 
   const requestTree = () => {
@@ -216,6 +220,8 @@ export function LayersPanel() {
             depth={0}
             expandedIds={expandedIds}
             selectedId={selectedId}
+            hiddenIds={hiddenIds}
+            lockedIds={lockedIds}
             toggleExpanded={actions.toggleExpanded}
             onContextMenu={(x, y, n) => setContextMenu({ x, y, node: n })}
           />
@@ -243,14 +249,28 @@ interface TreeItemProps {
   depth: number;
   expandedIds: Set<string>;
   selectedId: string | null;
+  hiddenIds: Set<string>;
+  lockedIds: Set<string>;
   toggleExpanded: (id: string) => void;
   onContextMenu: (x: number, y: number, node: TreeNode) => void;
 }
 
-function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onContextMenu }: TreeItemProps) {
+function TreeItem({ 
+  node, 
+  depth, 
+  expandedIds, 
+  selectedId, 
+  hiddenIds,
+  lockedIds,
+  toggleExpanded, 
+  onContextMenu 
+}: TreeItemProps) {
   const isExpanded = expandedIds.has(node.id);
   const isSelected = selectedId === node.id;
+  const isHidden = hiddenIds.has(node.id);
+  const isLocked = lockedIds.has(node.id);
   const hasChildren = node.children && node.children.length > 0;
+  const { actions } = useExplorerStore();
 
   const getIcon = (tag: string, isComponent: boolean) => {
     if (isComponent) return 'ph-diamond';
@@ -312,6 +332,14 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
       <div
         onClick={handleSelect}
         onContextMenu={handleContextMenu}
+        onMouseEnter={() => {
+            if (node.isZenithElement) {
+                window.postMessage({ type: 'requestHover', zenithId: node.id }, '*');
+            }
+        }}
+        onMouseLeave={() => {
+            window.postMessage({ type: 'requestHoverClear' }, '*');
+        }}
         className={clsx(
           'group flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-all relative border-l-2',
           isSelected
@@ -329,13 +357,47 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
           )}
         </div>
 
+        {/* Photoshop-style Visibility Controls on the Left */}
+        <div className="flex items-center gap-0.5 shrink-0 -ml-0.5 mr-1">
+          <button
+            onClick={e => { 
+                e.stopPropagation(); 
+                actions.toggleVisibility(node.id);
+                vscode.postMessage({ type: 'toggleVisibility', zenithId: node.id, isHidden: !isHidden });
+            }}
+            className={clsx(
+                "p-0.5 hover:bg-white/10 rounded transition-colors",
+                isHidden ? "text-yellow-500 opacity-100" : "text-white/30 hover:text-white"
+            )}
+            title="Toggle Visibility"
+            style={{ opacity: isHidden ? 1 : undefined }} // Ensure eye-slash is always visible if intentionally hidden
+          >
+            <i className={clsx("ph text-[12px]", isHidden ? "ph-eye-slash" : "ph-eye")} />
+          </button>
+          <button
+            onClick={e => { 
+                e.stopPropagation(); 
+                actions.toggleLock(node.id);
+                vscode.postMessage({ type: 'toggleLock', zenithId: node.id, isLocked: !isLocked });
+            }}
+            className={clsx(
+                "p-0.5 hover:bg-white/10 rounded transition-colors",
+                isLocked ? "text-red-500 opacity-100" : "text-white/30 hover:text-white"
+            )}
+            title="Lock Layer"
+            style={{ opacity: isLocked ? 1 : undefined }}
+          >
+            <i className={clsx("ph text-[12px]", isLocked ? "ph-lock-simple-fill" : "ph-lock-simple")} />
+          </button>
+        </div>
+
         <i className={clsx(
           'ph text-[13px] shrink-0', 
           isComponent ? 'ph-fill text-purple-400' : 'opacity-40',
           getIcon(node.tagName, isComponent)
         )} />
 
-        <div className="flex items-baseline gap-2 truncate flex-1 min-w-0">
+        <div className="flex items-baseline gap-2 truncate flex-1 min-w-0 ml-1">
           {node.componentName ? (
             <>
               <span className={clsx(
@@ -355,38 +417,6 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
               {node.tagName}
             </span>
           )}
-        </div>
-
-        {/* Studio Layer Controls — Visibility & Lock (Onlook Signature) */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mr-1">
-          <button
-            onClick={e => { 
-                e.stopPropagation(); 
-                actions.toggleVisibility(node.id);
-                vscode.postMessage({ type: 'toggleVisibility', zenithId: node.id });
-            }}
-            className={clsx(
-                "p-1 hover:bg-white/10 rounded transition-colors",
-                useExplorerStore.getState().hiddenIds.has(node.id) ? "text-yellow-500" : "text-white/30 hover:text-white"
-            )}
-            title="Toggle Visibility"
-          >
-            <i className={clsx("ph text-[10px]", useExplorerStore.getState().hiddenIds.has(node.id) ? "ph-eye-slash" : "ph-eye")} />
-          </button>
-          <button
-            onClick={e => { 
-                e.stopPropagation(); 
-                actions.toggleLock(node.id);
-                vscode.postMessage({ type: 'toggleLock', zenithId: node.id });
-            }}
-            className={clsx(
-                "p-1 hover:bg-white/10 rounded transition-colors",
-                useExplorerStore.getState().lockedIds.has(node.id) ? "text-red-500" : "text-white/30 hover:text-white"
-            )}
-            title="Lock Layer"
-          >
-            <i className={clsx("ph text-[10px]", useExplorerStore.getState().lockedIds.has(node.id) ? "ph-lock-simple-fill" : "ph-lock-simple")} />
-          </button>
         </div>
 
         {node.className && (
@@ -409,6 +439,8 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
               depth={depth + 1}
               expandedIds={expandedIds}
               selectedId={selectedId}
+              hiddenIds={hiddenIds}
+              lockedIds={lockedIds}
               toggleExpanded={toggleExpanded}
               onContextMenu={onContextMenu}
             />
@@ -418,3 +450,4 @@ function TreeItem({ node, depth, expandedIds, selectedId, toggleExpanded, onCont
     </div>
   );
 }
+

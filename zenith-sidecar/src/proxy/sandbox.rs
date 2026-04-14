@@ -425,16 +425,19 @@ const ZENITH_BRIDGE_INJECTION: &str = r#"
     if (event.data.type === 'zenithRequestTree') {
       logToParent("Building hierarchy tree...");
       const buildTree = (el) => {
-        return Array.from(el.children).filter(c => !['SCRIPT','STYLE'].includes(c.tagName)).map(child => {
-          const zid = child.getAttribute('data-zenith-id');
-          return {
-            id: zid || 'gen-' + Math.random().toString(36).slice(2, 9),
-            tagName: child.tagName.toLowerCase(),
-            className: child.className,
-            componentName: extractFiberMetadata(child).name,
-            children: buildTree(child)
-          };
-        });
+        return Array.from(el.children)
+          .filter(c => !['SCRIPT','STYLE'].includes(c.tagName))
+          .map(child => {
+            const zid = child.getAttribute('data-zenith-id');
+            return {
+              id: zid || 'gen-' + Math.random().toString(36).slice(2, 9),
+              tagName: child.tagName.toLowerCase(),
+              className: child.className,
+              isZenithElement: !!zid,
+              componentName: extractFiberMetadata(child).name,
+              children: buildTree(child)
+            };
+          });
       };
       const tree = buildTree(document.body);
       window.parent.postMessage({ type: 'zenithTreeUpdate', tree }, '*');

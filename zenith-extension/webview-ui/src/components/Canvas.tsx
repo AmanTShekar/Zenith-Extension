@@ -6,19 +6,18 @@ import {
   useExplorerStore 
 } from '../stores';
 import { clsx } from 'clsx';
-import { Layout } from 'lucide-react';
+import { Layout as LayoutIcon } from 'lucide-react';
 
 import { useArtboardInteraction } from '../hooks/useArtboardInteraction';
 import { SelectionOverlay } from './SelectionOverlay';
 import { SpacingRulers } from './SpacingRulers';
 import { CanvasContextMenu } from './CanvasContextMenu';
-import { vscode } from '../bridge';
 
 const ArtboardHeader: React.FC<{ title: string; w: number; h: number }> = ({ title, w, h }) => (
   <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-[#0a0a0a]/50 backdrop-blur-sm rounded-t-2xl">
     <div className="flex items-center gap-3">
       <div className="p-1.5 bg-cyan-500/10 rounded-lg">
-        <Layout className="w-3.5 h-3.5 text-cyan-400" />
+        <LayoutIcon className="w-3.5 h-3.5 text-cyan-400" />
       </div>
       <span className="text-[11px] font-bold text-white/90 uppercase tracking-widest">{title}</span>
     </div>
@@ -103,7 +102,7 @@ const Artboard: React.FC<{
       const data = e.data;
       if (!data || typeof data !== 'object') return;
       // ... sync logic remains same ...
-      if (data.type === 'zenithHierarchy') explorerActions.setTree(data.tree);
+      if (data.type === 'zenithTreeUpdate') explorerActions.setTree(data.tree);
       if (data.type === 'zenithHover' && !previewMode) {
           useSelectionStore.setState({ hoverRect: data.rect, hoverTag: data.tagName || data.element });
       }
@@ -127,13 +126,13 @@ const Artboard: React.FC<{
   }, [explorerActions, previewMode]);
 
   useEffect(() => {
-    const handlePreview = (e: any) => {
+    const handlePreview = (e: CustomEvent<{ zenithId: string; property?: string; value?: string; styles?: Record<string, string> }>) => {
       const { zenithId, property, value, styles } = e.detail;
-      const payload = styles ? { type: 'zenithBatchPatch', zenithId, styles } : { type: 'zenithPatchStyle', id: zenithId, property, value };
+      const payload = styles ? { type: 'zenithBatchPatch', zenithId, styles } : { type: 'zenithPatchStyle', id: zenithId, property: property!, value: value! };
       iframeRef.current?.contentWindow?.postMessage(payload, '*');
     };
-    window.addEventListener('zenith-preview-style', handlePreview as any);
-    return () => window.removeEventListener('zenith-preview-style', handlePreview as any);
+    window.addEventListener('zenith-preview-style', handlePreview as EventListener);
+    return () => window.removeEventListener('zenith-preview-style', handlePreview as EventListener);
   }, []);
 
   return (
@@ -178,7 +177,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
   const [isPanning, setIsPanning] = useState(false);
   const previewMode = useSystemStore(state => state.previewMode);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const isSelectMode = activeTool === 'select' && !isSpacePressed && !previewMode;
+  const isSelectMode = ['select', 'text', 'insert'].includes(activeTool) && !isSpacePressed && !previewMode;
 
   // v11.3: Studio Refinement — Use ref for stable closures in high-frequency events
   const stateRef = useRef({ zoom, pan });

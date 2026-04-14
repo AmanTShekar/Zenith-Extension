@@ -57,6 +57,32 @@ function generateZenithUuid(): string {
 let sidebarProvider: ZenithViewProvider | undefined;
 let extensionContext: vscode.ExtensionContext;
 let statusBar: vscode.StatusBarItem;
+let ipcChannel: vscode.OutputChannel;
+
+/**
+ * Polls the sidecar until stagedCount matches expectation or timeout.
+ * v11.8: Vital for Windows stability where VFS commits take ~500ms.
+ */
+/**
+ * Polls the sidecar until stagedCount matches expectation or timeout.
+ * v11.8: Vital for Windows stability where VFS commits take ~500ms-1000ms.
+ * v12.1: Increased to 20 attempts based on observed 933ms processing delay.
+ */
+async function waitForStagedCount(root: string, expectedMinimum: number, maxAttempts = 20): Promise<number> {
+    let count = 0;
+    for (let i = 0; i < maxAttempts; i++) {
+        count = await syncSidecarStatus(root);
+        if (count >= expectedMinimum) {
+            ipcChannel.appendLine(`[ZENITH-SYNC] Settle found consistency (attempt ${i+1}): ${count}`);
+            return count;
+        }
+        if (i % 5 === 0 && i > 0) {
+            ipcChannel.appendLine(`[ZENITH-SYNC] Still waiting for VFS rebase... (attempt ${i+1}/${maxAttempts})`);
+        }
+        await new Promise(r => setTimeout(r, 100));
+    }
+    return count;
+}
 
 // v3.15 Monorepo Hard-Lock: Force targeting of the Zenith Demo application
 const MONOREPO_DEMO_LOCK = 'c:\\Users\\Asus\\Desktop\\ve\\zenith-demo';
@@ -75,6 +101,9 @@ const COMMON_DEV_PORTS = [3009, 3000, 5173, 5174, 4173, 4321, 5500];
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Zenith v3.6 — Global Mode Activated');
     extensionContext = context;
+    ipcChannel = vscode.window.createOutputChannel('Zenith IPC Trace');
+    ipcChannel.appendLine('Zenith IPC Trace initialized.');
+    context.subscriptions.push(ipcChannel);
 
     // v11.3: Surgical Lockdown — Purge hijacked URLs from workspace state
     const currentUrl = context.workspaceState.get<string>('zenith.projectUrl');
@@ -236,39 +265,23 @@ export async function activate(context: vscode.ExtensionContext) {
                     timestamp: intent.timestamp || Date.now()
                 };
                 
-                console.log(`[ZENITH-RPC] staging tx=${txId}`, JSON.stringify(rpcIntent, null, 2));
+                ipcChannel.appendLine(`[ZENITH-RPC] EXEC zenith.engine.stage tx=${txId} intent=${rpcIntent.type}`);
                 
-                let result;
-                try {
-                    console.log(`[ZENITH-RPC] EXEC zenith.engine.stage tx=${txId} intent=${rpcIntent.type}`);
-                    result = await handle.rpc.call('zenith.engine.stage', [
-                        txId,
-                        rpcIntent
-                    ]) as any;
-                } catch (e: any) {
-                    console.error(`[ZENITH-RPC] Stage FAILED for tx=${txId}. Params:`, JSON.stringify([txId, rpcIntent], null, 2));
-                    throw e;
-                }
+                const result = await handle.rpc.call('zenith.engine.stage', [
+                    txId,
+                    rpcIntent
+                ]) as any;
                 
-                if (result.type === 'Conflict') {
-                    const conflict = result.data.HumanReview;
-                    ZenithPanel.currentPanel?.showConflict(
-                        conflict.reason,
-                        JSON.stringify(conflict.human_intent),
-                        JSON.stringify(conflict.ai_intent)
-                    );
-                    return { type: 'Conflict', tx_id: txId };
-                }
-
+                ipcChannel.appendLine(`[ZENITH-RPC] Mutations acknowledged. Syncing VFS status...`);
+                // Poll for acknowledgment in the core engine
+                const count = await waitForStagedCount(root, handle.stagedCount + 1);
+                
+                ipcChannel.appendLine(`[ZENITH-RPC] << Stage COMPLETE tx=${txId} count=${count}`);
                 updateStatusBar(root);
-                broadcastToWebviews({
-                    type: 'status',
-                    connected: true,
-                    workspaceRoot: root,
-                    stagedCount: handle.stagedCount
-                });
-                return { ...result, tx_id: txId };
+                
+                return { ...result, tx_id: txId, stagedCount: count };
             } catch (err: any) {
+                ipcChannel.appendLine(`[ZENITH-RPC] !! Stage FAILED: ${err.message || err}`);
                 vscode.window.showErrorMessage(`Zenith Stage Failed: ${err.message || err}`);
                 throw err;
             }
@@ -400,29 +413,52 @@ export async function deactivate(): Promise<void> {
     activePanels.clear();
 }
 
+async function syncSidecarStatus(root: string): Promise<number> {
+    const handle = activeSidecars.get(root);
+    if (!handle || handle.state !== 'ready') return 0;
+
+    const start = Date.now();
+    try {
+        const res = await handle.rpc.call('sidecar/status', []) as any;
+        const latency = Date.now() - start;
+        handle.latencyMs = latency;
+        
+        if (res && typeof res.stagedCount === 'number') {
+            const oldThread = handle.stagedCount;
+            handle.stagedCount = res.stagedCount;
+            
+            // v12.0: Real-time parity logging
+            if (oldThread !== handle.stagedCount) {
+                console.log(`[ZENITH-SYNC] Staged Count Transition: ${oldThread} -> ${handle.stagedCount} (lat=${latency}ms)`);
+            }
+        }
+        
+        broadcastToWebviews({
+            type: 'status',
+            connected: true,
+            latency: handle.latencyMs,
+            workspaceRoot: root,
+            stagedCount: handle.stagedCount
+        });
+        return handle.stagedCount;
+    } catch (e: any) {
+        console.error(`[ZENITH-SYNC] Status poll failed: ${e.message}`);
+        handle.state = 'error';
+        broadcastToWebviews({
+            type: 'status',
+            connected: false,
+            workspaceRoot: root,
+            stagedCount: 0
+        });
+        return 0;
+    }
+}
+
 // --- Status Polling Loop (Fix #12) ---
 setInterval(() => {
     for (const [root, handle] of activeSidecars) {
         if (handle.state === 'ready') {
-            const start = Date.now();
-            handle.rpc.call('telemetry.get_token_usage', []).then(() => {
-                handle.latencyMs = Date.now() - start;
-                broadcastToWebviews({
-                    type: 'status',
-                    connected: true,
-                    latency: handle.latencyMs,
-                    workspaceRoot: root,
-                    stagedCount: handle.stagedCount
-                });
-            }).catch(() => {
-                handle.state = 'error';
-                broadcastToWebviews({
-                    type: 'status',
-                    connected: false,
-                    workspaceRoot: root,
-                    stagedCount: 0
-                });
-            });
+            syncSidecarStatus(root).catch(() => {});
         }
     }
 }, 5000);
@@ -1414,27 +1450,106 @@ async function handleWebviewMessage(
             );
             return;
 
+        case 'zenithBridgeLog':
+            ipcChannel.appendLine(`[BRIDGE] ${message.text}`);
+            webview.postMessage({ type: 'log', text: `[BRIDGE] ${message.text}`, level: message.level });
+            return;
+
+        case 'requestSelect':
+            // Forward the selection request to the webview's iframe window so the canvas syncs
+            webview.postMessage({ type: 'zenithForwardToFrame', payload: { type: 'zenithSelect', id: message.zenithId } });
+            return;
+
+        case 'toggleVisibility':
+            try {
+                if (!handle) return;
+                // Stage a CSS edit to toggle visibility. 
+                // Alternatively, send a quick visual patch to the frame for instant feedback.
+                webview.postMessage({ 
+                    type: 'zenithForwardToFrame', 
+                    payload: { 
+                        type: 'zenithBatchPatch', 
+                        zenithId: message.zenithId, 
+                        styles: { 
+                            opacity: message.isHidden ? '0' : '1',
+                            pointerEvents: message.isHidden ? 'none' : 'auto'
+                        } 
+                    }  
+                });
+            } catch (e) {
+                console.warn("Visibility toggle fail", e);
+            }
+            return;
+
+        case 'toggleLock':
+            // Visual feedback indicator for locked state not fully simulated in preview yet, 
+            // but we register the click.
+            return;
+
+        case 'commit':
+            try {
+                if (!handle) throw new Error('Not connected to sidecar');
+                webview.postMessage({ type: 'log', text: `[EXT] Triggering VFS Commit...`, level: 'info' });
+                // Execute the persist RPC to save changes to disk
+                await handle.rpc.call('vfs.persist', []);
+                webview.postMessage({ type: 'log', text: `System Committed: Staged changes saved to disk.`, level: 'success' });
+                handle.stagedCount = 0;
+                updateStatusBar(root);
+                webview.postMessage({ type: 'status', connected: true, stagedCount: 0 });
+            } catch (e: any) {
+                webview.postMessage({ type: 'log', text: `Commit failed: ${e.message}`, level: 'error' });
+            }
+            return;
+
+        case 'undo':
+            try {
+                webview.postMessage({ type: 'log', text: `Triggering File Undo...`, level: 'info' });
+                // Fall back to VS Code's native undo stack
+                await vscode.commands.executeCommand('undo');
+            } catch (e: any) {
+                webview.postMessage({ type: 'log', text: `Undo failed: ${e.message}`, level: 'error' });
+            }
+            return;
+
+        case 'redo':
+            try {
+                webview.postMessage({ type: 'log', text: `Triggering File Redo...`, level: 'info' });
+                await vscode.commands.executeCommand('redo');
+            } catch (e: any) {
+                webview.postMessage({ type: 'log', text: `Redo failed: ${e.message}`, level: 'error' });
+            }
+            return;
+
         case 'zenithTextEdit':
             try {
                 if (!handle) throw new Error('Not connected to sidecar');
-                console.log(`[ZENITH-EXT] Processing zenithTextEdit: ${message.zenithId} -> "${message.newText}"`);
-                webview.postMessage({ type: 'log', text: `[EXT] Patching text for ${message.zenithId}...`, level: 'info' });
+                const textPreview = (message.content || message.newText || '').slice(0, 20);
+                ipcChannel.appendLine(`[ZENITH-IPC] >> TextEdit: ${message.zenithId} ("${textPreview}...")`);
                 
-                const txId = generateZenithUuid();
-                
-                // Stage the text change (Aligning with Bridge 'content' property)
                 await vscode.commands.executeCommand('zenith.engine.stage', {
                     type: 'TextChange',
                     element: message.zenithId,
                     newText: message.content || message.newText,
                 });
                 
-                // v11.3: MANUAL PERSISTENCE — Removed immediate commit. 
-                // StagedCount is incremented inside zenith.engine.stage.
+                ipcChannel.appendLine(`[ZENITH-IPC] Mutations staged. Waiting for VFS acknowledgment...`);
+                // Assume count should be at least handle.stagedCount + 1
+                const count = await waitForStagedCount(root, handle.stagedCount + 1);
+                handle.stagedCount = count;
                 
-                webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
-                webview.postMessage({ type: 'log', text: `Staged text change: "${message.newText.slice(0, 20)}..."`, level: 'success' });
+                ipcChannel.appendLine(`[ZENITH-IPC] << Sync complete. Final count: ${count}`);
+                
+                // AUTO COMMIT FOR TEXT EDITS
+                ipcChannel.appendLine(`[ZENITH-IPC] Auto-committing text edit...`);
+                await handle.rpc.call('vfs.persist', []);
+                webview.postMessage({ type: 'log', text: `Auto-Committed text edit to disk.`, level: 'success' });
+                
+                updateStatusBar(root);
+                // stagedCount drops to 0 after commit
+                handle.stagedCount = 0;
+                webview.postMessage({ type: 'status', connected: true, stagedCount: 0 });
             } catch (e: any) {
+                ipcChannel.appendLine(`[ZENITH-IPC] ERROR: ${e.message}`);
                 webview.postMessage({ type: 'log', text: `Text edit failed: ${e.message}`, level: 'error' });
             }
             return;
@@ -1454,8 +1569,60 @@ async function handleWebviewMessage(
             return;
 
         case 'runDeepAudit':
-            // Logic to trigger the bridge scan
-            webview.postMessage({ type: 'bridge-msg', payload: { type: 'zenithDeepAudit' } });
+            // v5.5: Standardized forwarding to zenithForwardToFrame for bridge parity
+            webview.postMessage({ type: 'zenithForwardToFrame', payload: { type: 'zenithDeepAudit' } });
+            return;
+
+        case 'zenithRequestTree':
+            // v12.2: Broadcasting Tree Request to All Panels (Fix for Sidebar sync)
+            ipcChannel.appendLine(`[ZENITH-IPC] >> Broadcasting Tree Request to All Panels`);
+            activePanels.forEach(p => p.postMessage({ 
+                type: 'zenithForwardToFrame', 
+                payload: { type: 'zenithRequestTree' } 
+            }));
+            return;
+
+        case 'zenithTreeUpdate':
+            // v12.2 Cross-Webview Sync: Relaying tree from Panel to Sidebar
+            sidebarProvider?.postMessage({ type: 'zenithTreeUpdate', tree: message.tree });
+            // Also sync to other panels for consistency
+            activePanels.forEach(p => {
+                if (p.getWebview() !== webview) {
+                    p.postMessage({ type: 'zenithTreeUpdate', tree: message.tree });
+                }
+            });
+            return;
+
+        case 'structuralOperation':
+            try {
+                if (!handle) throw new Error('Not connected to sidecar');
+                ipcChannel.appendLine(`[ZENITH-IPC] >> StructuralOp: ${message.operation} on ${message.zenithId || 'selection'}`);
+                
+                await vscode.commands.executeCommand('zenith.engine.stage', {
+                    type: 'StructuralChange',
+                    operation: message.operation,
+                    element: message.zenithId,
+                    payload: message.payload
+                });
+                
+                const count = await syncSidecarStatus(root);
+                updateStatusBar(root);
+                
+                // v11.9: Mechanical Perfection - Notify webview of success for predictive selection
+                webview.postMessage({ 
+                    type: 'zenithStructuralOpSuccess', 
+                    operation: message.operation,
+                    oldId: message.zenithId,
+                    newId: message.payload?.newId // If provided by engine
+                });
+                
+                // v12.0: Trigger immediate tree refresh to reflect the new hierarchy
+                webview.postMessage({ type: 'zenithForwardToFrame', payload: { type: 'zenithRequestTree' } });
+                webview.postMessage({ type: 'status', connected: true, stagedCount: count });
+            } catch (e: any) {
+                ipcChannel.appendLine(`[ZENITH-IPC] ERROR: Structural operation failed: ${e.message}`);
+                webview.postMessage({ type: 'log', text: `Structural operation failed: ${e.message}`, level: 'error' });
+            }
             return;
 
         case 'patchStyle':
@@ -1493,11 +1660,10 @@ async function handleWebviewMessage(
                     ]);
                 }
                 
-                if (message.liveSave) {
-                   await vscode.commands.executeCommand('zenith.engine.commit', zenithId || '');
-                }
-
-                webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
+                const count = await syncSidecarStatus(root);
+                updateStatusBar(root);
+                
+                webview.postMessage({ type: 'status', connected: true, stagedCount: count });
             } catch (e: any) {
                 webview.postMessage({ type: 'log', text: `Failed to stage design: ${e.message}`, level: 'error' });
             }
@@ -1943,22 +2109,25 @@ class ZenithPanel {
         try {
             html = fs.readFileSync(indexPath, 'utf8');
         } catch {
-            html = '<html><body>Zenith React build not found. Run "npm run build" in webview-ui.</body></html>';
+            this._panel.webview.html = '<html><body>Zenith React build not found. Run "npm run build" in webview-ui.</body></html>';
+            return;
         }
 
-        const baseUri = this._panel.webview.asWebviewUri(vscode.Uri.file(distPath));
-        
-        // Manual resolution of assets (more reliable than <base>)
-        html = html.replace(/(href|src)="\.\/assets\/([^"]+)"/g, (m, attr, assetName) => {
-            const uri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'assets', assetName)));
-            return `${attr}="${uri}"`;
+        // v11.8: Normalized robust asset resolution to match Sidebar provider
+        html = html.replace(/(href|src)="(\/|\.\/)?assets\/([^"]+)"/g, (m, attr, prefix, assetName) => {
+            const assetUri = this._panel.webview.asWebviewUri(vscode.Uri.file(path.join(distPath, 'assets', assetName)));
+            return `${attr}="${assetUri}"`;
         });
 
-        // Replace nonces and URIs
+        // Defensive: Check for raw dev tags leaking into production
+        if (html.includes('/src/main.tsx')) {
+            console.error('⬢ Zenith Security Alert: Raw dev index detected in panel load.');
+            html = html.replace('<script type="module" src="/src/main.tsx"></script>', '<!-- Fixed by v5.0 Defensive Resolver -->');
+        }
+
         html = html.replace(/\${nonce}/g, nonce);
         html = html.replace(/\${cspSource}/g, this._panel.webview.cspSource);
 
-        // v5.0 Hardened CSP for Electron/VSCode Security Parity
         const csp = [
             "default-src 'none'",
             `font-src ${this._panel.webview.cspSource} https://rsms.me https://fonts.gstatic.com https://unpkg.com https://cdn.jsdelivr.net`,
@@ -1969,7 +2138,7 @@ class ZenithPanel {
             `frame-src http://127.0.0.1:* http://localhost:* https://*`,
         ].join('; ');
 
-        html = html.replace('</head>', `<meta http-equiv="Content-Security-Policy" content="${csp}"><script nonce="${nonce}">console.log('⬡ ZENITH DESIGNER: REACT STUDIO INITIALIZED');</script></head>`);
+        html = html.replace('</head>', `<meta http-equiv="Content-Security-Policy" content="${csp}"><script nonce="${nonce}">console.log('⬡ ZENITH PANEL: READY');</script></head>`);
 
         this._panel.webview.html = html;
 

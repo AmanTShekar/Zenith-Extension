@@ -12,6 +12,12 @@ interface DiagnosticResult {
   onAction?: () => void;
 }
 
+interface AuditDetail {
+  trackedElements: number;
+  collisions: any[];
+  misalignments: any[];
+}
+
 export const SurgicalDoctor: React.FC<{ 
   isOpen: boolean; 
   onClose: () => void;
@@ -39,10 +45,12 @@ export const SurgicalDoctor: React.FC<{
       const now = performance.now();
       frames++;
       if (now > lastTime + 1000) {
+        // v11.8: Hardened performance typing for Chrome/Electron
+        const perf = performance as Performance & { memory?: { usedJSHeapSize: number } };
         setMetrics(prev => ({
           ...prev,
           fps: Math.round((frames * 1000) / (now - lastTime)),
-          memory: (performance as any).memory ? Math.round((performance as any).memory.usedJSHeapSize / 1048576) : 0,
+          memory: perf.memory ? Math.round(perf.memory.usedJSHeapSize / 1048576) : 0,
           latency: Math.floor(Math.random() * 5) + 8 // Simulated RPC jitter
         }));
         lastTime = now;
@@ -132,19 +140,19 @@ export const SurgicalDoctor: React.FC<{
   };
 
   useEffect(() => {
-    const handleAudit = (e: any) => {
-      const results = e.detail;
+    const handleAudit = (e: Event) => {
+      const customEvent = e as CustomEvent<AuditDetail>;
+      const auditResults = customEvent.detail;
       setIsFixing(false);
       
       setResults(prev => prev.map(r => {
         if (r.id === 'structural') {
-          const hasIssues = results.collisions.length > 0 || results.misalignments.length > 0;
+          const hasIssues = auditResults.collisions.length > 0 || auditResults.misalignments.length > 0;
           return {
             ...r,
             status: hasIssues ? 'fail' : 'ok',
-            message: `Audited ${results.trackedElements} elements. ${results.collisions.length} collisions found.`,
+            message: `Audited ${auditResults.trackedElements} elements. ${auditResults.collisions.length} collisions found.`,
             actionLabel: hasIssues ? 'Heal Structural Layers' : undefined,
-            id: 'structural'
           };
         }
         return r;
@@ -175,16 +183,17 @@ export const SurgicalDoctor: React.FC<{
     if (!isOpen) return;
     
     // Auto-trigger deep audit on open
-    const initialResults = [
+    const initialResults: DiagnosticResult[] = [
         { id: 'sidecar', name: 'Engine Connection', status: 'pending', message: 'Checking Bridge...' },
         { id: 'structural', name: 'Structural Audit', status: 'pending', message: 'Analyzing collisions...' },
         { id: 'vfs', name: 'Surgical Persistence', status: 'pending', message: 'Auditing WAL...' },
         { id: 'path', name: 'Path Integrity', status: 'pending', message: 'Verifying relative links...' }
     ];
-    setResults(initialResults as any);
+    setResults(initialResults);
     
     setTimeout(runDeepAudit, 500);
   }, [isOpen]);
+
 
   const onResultAction = (id: string) => {
     if (id === 'vfs') runHardening();

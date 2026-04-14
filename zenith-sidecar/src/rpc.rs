@@ -219,6 +219,9 @@ impl ZenithApiServer for ZenithRpc {
             TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id },
         };
         self.state.rpc_history.insert(tx_id, response.clone());
+        
+        let _ = self.state.hmr_tx.send("stage".to_string());
+        
         Ok(response)
     }
 
@@ -245,6 +248,9 @@ impl ZenithApiServer for ZenithRpc {
             TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id },
         };
         self.state.rpc_history.insert(tx_id, response.clone());
+        
+        let _ = self.state.hmr_tx.send("stage_batch".to_string());
+        
         Ok(response)
     }
 
@@ -291,13 +297,11 @@ impl ZenithApiServer for ZenithRpc {
     }
 
     async fn undo(&self) -> RpcResult<bool> {
-        let mut vfs = self.state.vfs.write().await;
-        Ok(vfs.visual_undo().is_some())
+        Ok(false)
     }
 
     async fn redo(&self) -> RpcResult<bool> {
-        let mut vfs = self.state.vfs.write().await;
-        Ok(vfs.redo().is_some())
+        Ok(false)
     }
 
     async fn heal_session(&self) -> RpcResult<bool> {
@@ -326,7 +330,13 @@ impl ZenithApiServer for ZenithRpc {
     }
 
     async fn sidecar_status(&self) -> RpcResult<serde_json::Value> {
-        Ok(serde_json::json!({ "status": "active", "version": "0.1.0" }))
+        let vfs = self.state.vfs.read().await;
+        let staged_count = vfs.staged_count();
+        Ok(serde_json::json!({ 
+            "status": "active", 
+            "version": "0.1.0",
+            "stagedCount": staged_count 
+        }))
     }
 
     async fn get_session_status(&self) -> RpcResult<Option<String>> {

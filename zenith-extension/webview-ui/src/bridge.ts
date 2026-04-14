@@ -1,9 +1,41 @@
-declare const acquireVsCodeApi: any;
+interface VSCodeApi {
+  postMessage: (msg: ZenithIpcMessage) => void;
+  getState: <T>() => T;
+  setState: <T>(state: T) => void;
+}
+
+export type ZenithIpcMessage = 
+  | { type: 'ready' }
+  | { type: 'commit' | 'commitAll' }
+  | { type: 'toggleSurgical' }
+  | { type: 'popOut' }
+  | { type: 'setDevServerUrl'; url: string }
+  | { type: 'zenithRequestTree' }
+  | { type: 'zenithOpenSource'; zenithId: string; filePath?: string; line?: number }
+  | { type: 'zenithTextEdit'; zenithId: string; content: string }
+  | { type: 'stage'; intent: ZenithIntent; zenithStack?: any[] }
+  | { type: 'structuralOperation'; operation: string; zenithId: string; payload?: any }
+  | { type: 'toggleVisibility'; zenithId: string }
+  | { type: 'toggleLock'; zenithId: string }
+  | { type: 'hardenWal' }
+  | { type: 'runDeepAudit' }
+  | { type: 'healSession' }
+  | { [key: string]: unknown; type: string };
+
+export interface ZenithIntent {
+  type: 'PropertyChange' | 'StructuralChange';
+  element: string;
+  property?: string;
+  value?: string | number;
+  timestamp: number;
+}
+
+declare const acquireVsCodeApi: () => VSCodeApi;
 
 class VSCodeBridge {
-  private vscode = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
+  private vscode: VSCodeApi | null = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
-  postMessage(msg: { type: string; [key: string]: any }) {
+  postMessage(msg: ZenithIpcMessage) {
     if (this.vscode) {
       this.vscode.postMessage(msg);
     } else {
@@ -12,7 +44,7 @@ class VSCodeBridge {
   }
 
   // Helper for staging properties
-  stage(element: string, property: string, value: string, stack: unknown[] = []) {
+  stage(element: string, property: string, value: string, stack: any[] = []) {
     this.postMessage({ 
       type: 'stage', 
       intent: { 
@@ -33,3 +65,4 @@ class VSCodeBridge {
 }
 
 export const vscode = new VSCodeBridge();
+

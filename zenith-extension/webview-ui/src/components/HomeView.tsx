@@ -11,7 +11,6 @@ export function HomeView({
   manualUrl,
   setManualUrl,
   onConnect,
-  onPopOut,
 }: { 
   onStart: () => void; 
   projectName: string; 
@@ -21,7 +20,6 @@ export function HomeView({
   manualUrl: string;
   setManualUrl: (url: string) => void;
   onConnect: (url: string) => void;
-  onPopOut: () => void;
 }) {
   const [isDoctorOpen, setIsDoctorOpen] = useState(false);
   const [isUrlPanelOpen, setIsUrlPanelOpen] = useState(detectedServers.length > 0);

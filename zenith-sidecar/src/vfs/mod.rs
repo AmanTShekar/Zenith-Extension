@@ -959,6 +959,12 @@ impl VirtualFileSystem {
         }
     }
 
+    pub fn staged_count(&self) -> usize {
+        self.transactions.keys()
+            .filter(|tx| !self.is_draft(**tx))
+            .count()
+    }
+
     /// Stage a patch and create an undo frame.
     pub fn stage_with_undo(
         &mut self,

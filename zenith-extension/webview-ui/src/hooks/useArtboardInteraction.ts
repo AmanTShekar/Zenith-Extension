@@ -8,7 +8,7 @@ export interface DragState {
   startRect: { x: number; y: number; width: number; height: number };
 }
 
-export function useArtboardInteraction(iframeRef: React.RefObject<HTMLIFrameElement>) {
+export function useArtboardInteraction(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
   const selectedRect = useSelectionStore(state => state.rect);
   const zoom = useCanvasStore(state => state.zoom);
   const { previewBatch, patchBatch, setRect } = useSelectionStore(state => state.actions);

@@ -13,6 +13,21 @@ interface PropertyFieldProps {
   onCommit?: (value: string) => void;
 }
 
+const getIcon = (val: string) => {
+  switch (val) {
+    case 'row': return 'ph-arrow-right';
+    case 'column': return 'ph-arrow-down';
+    case 'flex-start': return 'ph-align-left-simple';
+    case 'center': return 'ph-align-center-simple';
+    case 'flex-end': return 'ph-align-right-simple';
+    case 'space-between': return 'ph-arrows-out-line-horizontal';
+    case 'left': return 'ph-text-align-left';
+    case 'right': return 'ph-text-align-right';
+    case 'justify': return 'ph-text-align-justify';
+    default: return null;
+  }
+};
+
 function PropertyField({ property, definition, value, sectionValues, onChange, onCommit }: PropertyFieldProps) {
   const label = definition.label || property;
 
@@ -35,21 +50,6 @@ function PropertyField({ property, definition, value, sectionValues, onChange, o
           <div className="flex items-center gap-0.5 flex-1 justify-end flex-wrap">
             {definition.options?.map(opt => {
               const isSelected = value === opt.value;
-              // Onlook Trait: Visual Iconography for Directions/Alignments
-              const getIcon = (val: string) => {
-                switch(val) {
-                  case 'row': return 'ph-arrow-right';
-                  case 'column': return 'ph-arrow-down';
-                  case 'flex-start': return 'ph-align-left-simple';
-                  case 'center': return 'ph-align-center-simple';
-                  case 'flex-end': return 'ph-align-right-simple';
-                  case 'space-between': return 'ph-arrows-out-line-horizontal';
-                  case 'left': return 'ph-text-align-left';
-                  case 'right': return 'ph-text-align-right';
-                  case 'justify': return 'ph-text-align-justify';
-                  default: return null;
-                }
-              }
               const icon = getIcon(opt.value);
 
               return (

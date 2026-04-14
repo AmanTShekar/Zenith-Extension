@@ -4,6 +4,7 @@
 
 import path from "node:path";
 import net from "node:net";
+import fs from "node:fs";
 import type { Plugin, ResolvedConfig } from "vite";
 import WebSocket from "ws";
 import { injectGhostIds } from "./injector.js";
@@ -119,7 +120,94 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
         });
       }
 
+      function warmupRegistry() {
+        if (!rpcWs || rpcWs.readyState !== WebSocket.OPEN) return;
+        
+        console.log(`[Zenith Vite] Proactive Registry Warmup starting in: ${projectRoot}`);
+        const files: string[] = [];
+
+        function scan(dir: string) {
+          try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const fullPath = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                if (entry.name !== 'node_modules' && entry.name !== '.git' && entry.name !== 'dist') {
+                  scan(fullPath);
+                }
+              } else if (JSX_EXTENSIONS.test(entry.name)) {
+                files.push(fullPath);
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        scan(projectRoot);
+
+        for (const file of files) {
+          try {
+            const relativePath = path.relative(projectRoot, file).replace(/\\/g, '/');
+            const source = fs.readFileSync(file, 'utf-8');
+            const result = injectGhostIds(source, relativePath, attrName);
+            
+            const rpcId = Date.now() + Math.random();
+            rpcWs.send(JSON.stringify({
+              jsonrpc: "2.0",
+              method: "zenith.registry.register",
+              params: [result.entries],
+              id: `warmup_${rpcId}`
+            }));
+          } catch { /* skip */ }
+        }
+        console.log(`[Zenith Vite] Warmup complete. Registered ${files.length} files.`);
+      }
+
       connectRpc();
+      // Wait a bit for connection to stabilize before warmup
+      setTimeout(warmupRegistry, 1000);
+    },
+
+    transformIndexHtml(html) {
+      // v11.3: Injected Runtime Bridge — Enables Layers Panel & Canvas Interactions
+      // This is local-only and only runs during development.
+      const curDir = path.dirname(import.meta.url.replace('file:///', ''));
+      const possiblePaths = [
+        path.join(curDir, 'runtime-bridge.js'),
+        path.join(curDir, '..', 'dist', 'runtime-bridge.js'),
+        path.join(curDir, 'runtime-bridge.ts'),
+        path.join(curDir, '..', 'src', 'runtime-bridge.ts')
+      ];
+
+      let bridgePath = '';
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          bridgePath = p;
+          break;
+        }
+      }
+
+      let bridgeCode = '';
+      if (bridgePath) {
+        try {
+          bridgeCode = fs.readFileSync(bridgePath, 'utf-8');
+        } catch (e) {
+          console.warn(`[Zenith Vite] Failed to read bridge at ${bridgePath}:`, e);
+        }
+      }
+      
+      if (!bridgeCode) {
+        console.warn('[Zenith Vite] Failed to locate runtime-bridge, using recovery fallback.');
+        bridgeCode = 'console.error("Zenith Bridge Source Missing");';
+      }
+
+      return [
+        {
+          tag: 'script',
+          attrs: { type: 'module' },
+          children: bridgeCode,
+          injectTo: 'body'
+        }
+      ];
     },
 
     async buildStart() {

@@ -2,6 +2,8 @@ import { parse, type ParserOptions } from "@babel/parser";
 import _traverse from "@babel/traverse";
 import * as t from "@babel/types";
 import * as recast from "recast";
+import fs from "node:fs";
+import path from "node:path";
 
 // Handle ESM/CJS interop for Babel packages
 const traverse = (
@@ -157,6 +159,16 @@ function isInDynamicBlock(openingElementPath: any): boolean {
 // Core patchSourceFile
 // ---------------------------------------------------------------------------
 
+function safeLog(message: string) {
+  try {
+     const logDir = path.join(process.cwd(), ".zenith");
+     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+     const logPath = path.join(logDir, "surgical.log");
+     const timestamp = new Date().toISOString();
+     fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`);
+  } catch { /* Fail silently to avoid breaking the transform */ }
+}
+
 export function patchSourceFile(source: string, instructions: PatchInstructions): string {
   const ast = recast.parse(source, {
     parser: babelParser,
@@ -178,61 +190,59 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
     if (selectorIdx >= selectorParts.length) {
       targetPath = currentPath;
       targetIsLocked = isLocked;
+      safeLog(`[DRY-RUN] Target successfully matched: ${instructions.zenithId}`);
       return;
     }
 
     const part = selectorParts[selectorIdx];
+    safeLog(`[TRAVERSAL] Resolving ${part} (Selector Index: ${selectorIdx})`);
     const [expectedTag, expectedIdxStr] = part.split(".");
     const expectedIdx = parseInt(expectedIdxStr, 10);
 
-    const matchInChildren = (nodes: any[], currentIdx: number, currentLocked: boolean): { found: boolean, nextIdx: number } => {
-      let jsxIdx = currentIdx;
+    const matchInChildren = (nodes: any[], tracker: { jsxIdx: number }, currentLocked: boolean): { found: boolean } => {
       for (const child of nodes) {
         if (t.isJSXElement(child)) {
-          if (jsxIdx === expectedIdx) {
+          if (tracker.jsxIdx === expectedIdx) {
             const tagName = getTagName(child.openingElement.name);
             if (tagName !== expectedTag) {
-              console.warn(`[ZENITH-SURGICAL] Tag mismatch at ${part}: expected ${expectedTag}, found ${tagName}. Proceeding anyway.`);
+              safeLog(`[FORENSIC-AUDIT] Tag mismatch at ${part}: expected <${expectedTag}>, found <${tagName}>. ZenithId: ${instructions.zenithId}`);
+              if (instructions.fingerprint) {
+                safeLog(`[AUDIT] Fingerprint failover ready: ${instructions.fingerprint}`);
+                return { found: false }; 
+              }
             }
-            matchPath({ node: child.openingElement, parentPath: { node: child } }, selectorIdx + 1, currentLocked);
-            if (targetPath) return { found: true, nextIdx: jsxIdx };
+            safeLog(`[TRAVERSAL] Descending into <${tagName}> at index ${expectedIdx}`);
+            matchPath({ node: child.openingElement, parentPath: { node: child, container: nodes, index: nodes.indexOf(child) } }, selectorIdx + 1, currentLocked);
+            if (targetPath) return { found: true };
           }
-          jsxIdx++;
+          tracker.jsxIdx++;
         } else if (t.isJSXFragment(child)) {
-          // v11.6: Flatten Fragments — Fragments are transparent in the Zenith ID system.
-          // We traverse into them without incrementing the structural level, sharing the index counter.
-          const res = matchInChildren(child.children, jsxIdx, currentLocked);
-          if (res.found) return { found: true, nextIdx: res.nextIdx };
-          jsxIdx = res.nextIdx;
+          const res = matchInChildren(child.children, tracker, currentLocked);
+          if (res.found) return { found: true };
         } else if (t.isJSXExpressionContainer(child)) {
-          // v11.5+: Deep Resolve — Traverse into dynamic blocks
           const findInExpr = (expr: t.Node): boolean => {
             if (t.isJSXElement(expr)) {
-              if (jsxIdx === expectedIdx) {
-                matchPath({ node: expr.openingElement, parentPath: { node: expr } }, selectorIdx + 1, true); // Mark as LOCKED
+              if (tracker.jsxIdx === expectedIdx) {
+                matchPath({ node: expr.openingElement, parentPath: { node: expr, container: [expr], index: 0 } }, selectorIdx + 1, true);
                 return !!targetPath;
               }
-              jsxIdx++;
+              tracker.jsxIdx++;
             } else if (t.isJSXFragment(expr)) {
-              const res = matchInChildren(expr.children, jsxIdx, true);
-              jsxIdx = res.nextIdx;
+              const res = matchInChildren(expr.children, tracker, true);
               return res.found;
             } else if (t.isConditionalExpression(expr)) {
               if (findInExpr(expr.consequent)) return true;
               if (findInExpr(expr.alternate)) return true;
             } else if (t.isCallExpression(expr)) {
-              // Handle .map() and IIFEs
-             const callback = t.isMemberExpression(expr.callee) && t.isIdentifier(expr.callee.property, { name: 'map' }) 
+              const callback = t.isMemberExpression(expr.callee) && t.isIdentifier(expr.callee.property, { name: 'map' }) 
                 ? expr.arguments[0] 
                 : expr.callee;
-              
               if (t.isArrowFunctionExpression(callback) || t.isFunctionExpression(callback)) {
                 if (findInExpr(callback.body)) return true;
               }
             } else if (t.isLogicalExpression(expr)) {
               if (findInExpr(expr.right)) return true;
             } else if (t.isBlockStatement(expr)) {
-               // Descend into function blocks
                for (const statement of expr.body) {
                  if (findInExpr(statement)) return true;
                }
@@ -244,14 +254,14 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
             }
             return false;
           };
-          if (findInExpr(child.expression)) return { found: true, nextIdx: jsxIdx };
+          if (findInExpr(child.expression)) return { found: true };
         }
       }
-      return { found: false, nextIdx: jsxIdx };
+      return { found: false };
     };
 
     const children = currentPath.parentPath.node.children || [];
-    matchInChildren(children, 0, isLocked);
+    matchInChildren(children, { jsxIdx: 0 }, isLocked);
     
     // Fallback: If literal index fails, try matching by tag name within children
     if (!targetPath) {
@@ -350,7 +360,17 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
 
   // v9.0 Pre-flight Tag Verification
   if (instructions.expectedTag && getTagName(node.name) !== instructions.expectedTag) {
-    throw new Error(`Surgical collision: Expected <${instructions.expectedTag}> but found <${getTagName(node.name)}> at "${instructions.zenithId}". Source may have drifted.`);
+    const foundTag = getTagName(node.name);
+    
+    // Final Attempt: If we matched structural ID but the tag is WRONG, 
+    // and we haven't tried fingerprint yet, try it now.
+    if (instructions.fingerprint && !targetIsLocked) {
+       safeLog(`[FAILOVER] Structural mismatch for "${instructions.zenithId}". Triggering fingerprint search: ${instructions.fingerprint}`);
+       targetPath = null;
+       // ... the global fingerprint search below will handle it
+    } else {
+       throw new Error(`Surgical collision: Expected <${instructions.expectedTag}> but found <${foundTag}> at "${instructions.zenithId}". Source has drifted beyond structural resolution.`);
+    }
   }
 
   // Logic-Lock
@@ -361,7 +381,11 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
 
   // ── 1. DELETE ──────────────────────────────────────────────────────────
   if (instructions.delete) {
-    jsxElementPath.remove();
+    if (jsxElementPath.container && Array.isArray(jsxElementPath.container)) {
+      (jsxElementPath.container as any[]).splice(jsxElementPath.index, 1);
+    } else {
+      jsxElementPath.remove();
+    }
   } else {
     // ── 2. STYLE PATCH ─────────────────────────────────────────────────────
     if (instructions.styles) updateStyleAttribute(node, instructions.styles);
@@ -421,10 +445,34 @@ function updateStyleAttribute(node: t.JSXOpeningElement, newStyles: Record<strin
   if (idx !== -1) {
     const attr = node.attributes[idx] as t.JSXAttribute;
     if (t.isJSXExpressionContainer(attr.value) && t.isObjectExpression(attr.value.expression)) {
-      // Merge: Keep existing properties unless they are being overwritten by newStyles
+      // v38.0 Forensic: Capture existing styles for conflict analysis
+      const existingStyleNames = attr.value.expression.properties
+        .filter(p => t.isObjectProperty(p) && t.isIdentifier(p.key))
+        .map(p => (p as t.ObjectProperty).key as t.Identifier)
+        .map(k => k.name);
+      
+      safeLog(`[STYLE-AUDIT] Found existing styles: ${existingStyleNames.join(", ")}`);
+
       existingProps = attr.value.expression.properties.filter(p => {
         if (t.isObjectProperty(p) && t.isIdentifier(p.key)) {
-          return !Object.keys(newStyles).includes(p.key.name);
+          const propName = p.key.name;
+          if (newStyles[propName]) {
+             // Responsiveness Check:
+             const newVal = newStyles[propName];
+             const oldValNode = p.value;
+             let oldValStr = "";
+             if (t.isStringLiteral(oldValNode)) oldValStr = oldValNode.value;
+             else if (t.isNumericLiteral(oldValNode)) oldValStr = oldValNode.value.toString();
+
+             const isNewPx = /^-?\d+(\.\d+)?(px)?$/.test(newVal);
+             const isOldRelative = /%|fr|rem|em|vh|vw/.test(oldValStr);
+
+             if (isNewPx && isOldRelative) {
+                safeLog(`[RESPONSIVENESS-WARNING] Property "${propName}" collision! Absolute value "${newVal}" is overwriting relative value "${oldValStr}". Layout may break.`);
+             }
+             return false; // Overwrite
+          }
+          return true;
         }
         return true;
       });
@@ -455,8 +503,6 @@ function updateStyleAttribute(node: t.JSXOpeningElement, newStyles: Record<strin
 // Helper: Update text content (preserve sibling nodes)
 // ---------------------------------------------------------------------------
 function updateTextContent(jsxElement: t.JSXElement, textContent: string | null | undefined): void {
-  const tagName = (jsxElement.openingElement.name as any).name || 'unknown';
-  console.log(`[SURGICAL] updateTextContent targeted: <${tagName}> -> "${textContent}"`);
   if (textContent === null || textContent === undefined) return;
   const parts = textContent.split("\n");
 
@@ -475,7 +521,7 @@ function updateTextContent(jsxElement: t.JSXElement, textContent: string | null 
   // For visual design, if we are setting textContent, we usually want to replace everything 
   // unless there are nested elements we want to keep.
   const hasMultipleChildren = jsxElement.children.length > 1;
-  const hasElements = jsxElement.children.some(c => t.isJSXElement(c) || t.isJSXComponent(c as any));
+  const hasElements = jsxElement.children.some(c => t.isJSXElement(c) || t.isJSXFragment(c));
 
   if (!hasElements || !hasMultipleChildren) {
     // Single child or purely text/fragments: Perform atomic replacement

@@ -211,7 +211,6 @@ export function injectGhostIds(
       const ghostId = `${normalizedPath}:${pathId}`;
 
 
-      // --- Fingerprinting for Self-Healing ---
       // v11.7.1 Perfection: Enriched Fingerprint (Tag | Classes | ChildTags | SiblingCount)
       const staticClasses = node.attributes
         .filter((attr: any) => t.isJSXAttribute(attr) && (attr.name as t.JSXIdentifier).name === "className" && t.isStringLiteral(attr.value))
@@ -222,34 +221,38 @@ export function injectGhostIds(
       const childFingerprint = parentNode.children
         ?.filter((c: any) => t.isJSXElement(c))
         .map((c: any) => getTagName(c.openingElement.name))
-        .slice(0, 3) // First 3 children for stability
+        .slice(0, 5) // Increased to 5 children for higher uniqueness in "New Sites"
         .join(",");
 
       const siblingCount = parentNode.children?.filter((c: any) => t.isJSXElement(c)).length ?? 0;
       const attrCount = node.attributes.length;
-      const fingerprint = `${tagName}|${staticClasses}|${childFingerprint || ""}|s${siblingCount}|a${attrCount}`;
+      
+      // v35.0 Hardening: Positional Tag-Hash (e.g. div#3 of 10)
+      let tagInstanceIdx = 0;
+      if (parentNode.children) {
+        for (const child of parentNode.children) {
+          if (child === path.parent) break;
+          if (t.isJSXElement(child) && getTagName(child.openingElement.name) === tagName) tagInstanceIdx++;
+        }
+      }
 
-      // --- Inject attributes ---
-      const ghostAttr = t.jsxAttribute(
-        t.jsxIdentifier(attribute),
-        t.stringLiteral(ghostId)
-      );
-      node.attributes.push(ghostAttr);
+      const fingerprint = `${tagName}|${staticClasses}|${childFingerprint || ""}|s${siblingCount}|a${attrCount}|i${tagInstanceIdx}`;
 
-      node.attributes.push(
-        t.jsxAttribute(
-          t.jsxIdentifier("data-zenith-fingerprint"),
-          t.stringLiteral(fingerprint)
-        )
-      );
+      // --- Inject / Update attributes ---
+      const updateAttr = (name: string, value: string) => {
+        // v11.7.7 Stabilizer: Strip ALL existing attributes of the same name
+        // to prevent Vite/esbuild "Duplicate attribute" warnings during HMR.
+        node.attributes = node.attributes.filter(
+          (a: any) => !(t.isJSXAttribute(a) && t.isJSXIdentifier(a.name) && a.name.name === name)
+        );
+        node.attributes.push(t.jsxAttribute(t.jsxIdentifier(name), t.stringLiteral(value)));
+      };
+
+      updateAttr(attribute, ghostId);
+      updateAttr("data-zenith-fingerprint", fingerprint);
 
       if (isInsideLogic) {
-        node.attributes.push(
-            t.jsxAttribute(
-                t.jsxIdentifier("data-zenith-logic-locked"),
-                t.stringLiteral("true")
-            )
-        );
+        updateAttr("data-zenith-logic-locked", "true");
       }
 
       // --- Record manifest entry ---

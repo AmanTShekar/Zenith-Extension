@@ -10,12 +10,12 @@ interface CanvasState {
   deviceType: DeviceType;
   orientation: 'portrait' | 'landscape';
   viewMode: 'single' | 'multi';
-  activeTool: 'select' | 'hand';
+  activeTool: 'select' | 'hand' | 'text' | 'insert';
   actions: {
     setZoom: (zoom: number) => void;
     setPan: (x: number, y: number) => void;
     setDevice: (type: DeviceType, w: number, h: number) => void;
-    setTool: (tool: 'select' | 'hand') => void;
+    setTool: (tool: 'select' | 'hand' | 'text' | 'insert') => void;
     toggleOrientation: () => void;
     setViewMode: (mode: 'single' | 'multi') => void;
     fitView: () => void;
