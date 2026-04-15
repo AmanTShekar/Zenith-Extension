@@ -58,13 +58,16 @@ Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information o
 
 ## License
 
-Zenith is licensed under the **[Apache License 2.0](LICENSE)**. Build, change, and create freely. 
+Zenith is licensed under the **[Zenith Commercial & Source-Available License](LICENSE)**. 
 
-*Our Apache licensing provides a robust legal framework, covering both copyright and patent protections for users and contributors.*
+*   **Individuals**: Free for personal, non-commercial use and educational exploration.
+*   **Commercial**: Use by any for-profit entity or for commercial advantage requires a separate, written Commercial License from the creator.
 
 ## 🎨 Creator
 
-Created with ❤️ by **[Aman T Shekar](https://github.com/AmanTShekar)**.
+Created with ❤️ by **[Aman T Shekar](https://github.com/AmanTShekar)**. 
+
+Join us in pushing the boundaries of how software is designed and built. For commercial licensing inquiries, please contact the creator directly.
 
 ---
 *Ready to build visually? Launch Zenith inside your workspace and start pointing, clicking, and building!*
