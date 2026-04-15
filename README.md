@@ -60,11 +60,11 @@ Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information o
 
 Zenith is governed by the **[Zenith Public License (Airtight Apache 2.0 Hybrid)](LICENSE)**.
 
-### 🛡️ The Balanced Legal Model
-We believe in open exploration, but we protect our innovation. Zenith uses a unique "Bricked-Up" license structure:
+### 🛡️ Legal Protection Details
+We believe in open exploration, but we strictly protect our intellectual property. Zenith uses a unique "Bricked-Up" license structure to prevent unauthorized exploitation:
 
-1.  **Non-Commercial (Apache 2.0)**: Individuals, students, and hobbyists are free to use, modify, and explore the code under the permissive Apache 2.0 terms.
-2.  **Commercial & Profit (Airtight Rider)**: Any use for monetary gain, revenue generation, or within a for-profit company is **strictly prohibited**. The [Commercial Rider](LICENSE) overrides all permissive grants for profit-making entities. This ensures the "Surgical AST Engine" and "VFS Bridge" stay protected.
+1.  **Non-Commercial Exploration**: Individuals, students, and hobbyists are permitted to use, study, and modify the code for personal, non-revenue-generating purposes under standard Apache 2.0 terms.
+2.  **Commercial, Profit & Sale (Strict Prohibition)**: All commercial use, revenue generation, corporate deployment, or selling of the Software (or its core engines) is **strictly prohibited**. The [Commercial Rider](LICENSE) overrides all permissive grants for any for-profit activity. unauthorized Commercial Use or Sale automatically revokes all licensing rights.
 
 ---
 
