@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { vscode } from './bridge';
-import { 
-  useSelectionStore, 
-  useCanvasStore, 
-  useExplorerStore, 
-  useSystemStore, 
-  useLogStore 
-} from './stores';
+import { useSelectionStore } from './stores/useSelectionStore';
+import { useExplorerStore } from './stores/useExplorerStore';
+import { useSystemStore } from './stores/useSystemStore';
+import { useLogStore } from './stores/useLogStore';
+import { useCanvasStore } from './stores/useCanvasStore';
 import { Toolbar } from './components/Toolbar';
 import { LeftSidebar } from './components/sidebar/LeftSidebar';
 import { InspectorPanel } from './components/InspectorPanel';
@@ -38,7 +36,6 @@ const App: React.FC = () => {
   const systemActions = useSystemStore(state => state.actions);
   const logActions = useLogStore(state => state.actions);
   const selectionActions = useSelectionStore(state => state.actions);
-  const canvasActions = useCanvasStore(state => state.actions);
   const explorerActions = useExplorerStore(state => state.actions);
   const previewMode = useSystemStore(state => state.previewMode);
 
@@ -95,8 +92,8 @@ const App: React.FC = () => {
           }
           case 'zenithTreeUpdate':
             explorerActions.setTree(m.tree || []);
-            // v12.2 Sync: Forward tree to extension so Sidebar can pick it up
-            vscode.postMessage(m);
+            // NOTE: Do NOT re-post back to extension — the extension already relays
+            // tree updates to all panels. Re-posting here creates an echo loop.
             break;
 
           case 'log':
@@ -200,6 +197,7 @@ const App: React.FC = () => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      logActions.add('info', 'GLOBAL_KEY_DOWN', { key: e.key, code: e.code });
       if (e.code === 'Space' && !e.repeat) systemActions.setIsSpacePressed(true);
       
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -225,19 +223,69 @@ const App: React.FC = () => {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') systemActions.setIsSpacePressed(false);
+      logActions.add('info', 'GLOBAL_KEY_UP', { key: e.key, code: e.code });
     };
+
+    // Omniscient Event Sink
+    let lastPointerMove = 0;
+    const POINTER_THROTTLE = 250;
+
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      logActions.add('info', 'GLOBAL_CLICK', { tag: target?.tagName, class: target?.className, x: e.clientX, y: e.clientY });
+    };
+
+    const handleGlobalPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      logActions.add('info', 'GLOBAL_POINTER_DOWN', { tag: target?.tagName, x: e.clientX, y: e.clientY });
+    };
+
+    const handleGlobalPointerUp = (e: PointerEvent) => {
+      logActions.add('info', 'GLOBAL_POINTER_UP', { x: e.clientX, y: e.clientY });
+    };
+
+    const handleGlobalPointerMove = (e: PointerEvent) => {
+      const now = Date.now();
+      if (now - lastPointerMove > POINTER_THROTTLE) {
+        lastPointerMove = now;
+        logActions.add('info', 'GLOBAL_POINTER_MOVE_THROTTLED', { x: e.clientX, y: e.clientY });
+      }
+    };
+
+    // Zustand Mutation Hooks
+    const unsubLogSystem = useSystemStore.subscribe((state) => {
+      logActions.add('info', 'STORE_SYSTEM_MUTATION', { previewMode: state.previewMode, connected: state.connectedServer });
+    });
+    const unsubLogSelection = useSelectionStore.subscribe((state) => {
+      logActions.add('info', 'STORE_SELECTION_MUTATION', { selectedId: state.selectedId, stagedCount: state.stagedCount });
+    });
+    const unsubLogCanvas = useCanvasStore.subscribe((state) => {
+      logActions.add('info', 'STORE_CANVAS_MUTATION', { activeTool: state.activeTool, deviceType: state.deviceType });
+    });
 
     window.addEventListener('message', handleMessage);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('click', handleGlobalClick, true);
+    window.addEventListener('pointerdown', handleGlobalPointerDown, true);
+    window.addEventListener('pointerup', handleGlobalPointerUp, true);
+    window.addEventListener('pointermove', handleGlobalPointerMove, true);
+
     vscode.postMessage({ type: 'ready' });
 
     return () => {
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('click', handleGlobalClick, true);
+      window.removeEventListener('pointerdown', handleGlobalPointerDown, true);
+      window.removeEventListener('pointerup', handleGlobalPointerUp, true);
+      window.removeEventListener('pointermove', handleGlobalPointerMove, true);
+      unsubLogSystem();
+      unsubLogSelection();
+      unsubLogCanvas();
     };
-  }, [systemActions, logActions, selectionActions, explorerActions, canvasActions]);
+  }, [systemActions, logActions, selectionActions, explorerActions]);
 
   return (
     <div className="flex flex-col h-screen bg-black text-text-primary overflow-hidden selection:bg-accent/10">

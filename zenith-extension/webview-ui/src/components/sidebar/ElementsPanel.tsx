@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { vscode } from '../../bridge';
 import { useSelectionStore } from '../../stores';
 import { clsx } from 'clsx';
@@ -180,5 +181,4 @@ export function ElementsPanel() {
   );
 }
 
-// React import needed for useState
-import { useState } from 'react';
+

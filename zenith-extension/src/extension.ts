@@ -84,9 +84,9 @@ async function waitForStagedCount(root: string, expectedMinimum: number, maxAtte
     return count;
 }
 
-// v3.15 Monorepo Hard-Lock: Force targeting of the Zenith Demo application
-const MONOREPO_DEMO_LOCK = 'c:\\Users\\Asus\\Desktop\\ve\\zenith-demo';
-let lastValidWorkspaceRoot: string | undefined = MONOREPO_DEMO_LOCK;
+// v3.15 Monorepo Lock: Prefer the demo subproject if found during workspace scan.
+// NOTE: No hardcoded paths — resolved at runtime from actual workspace folders.
+let lastValidWorkspaceRoot: string | undefined;
 
 // ---------------------------------------------------------------------------
 // Common dev server ports to probe (order = likelihood)
@@ -141,6 +141,21 @@ export async function activate(context: vscode.ExtensionContext) {
             }
             for (const removed of e.removed) {
                 void shutdownSidecarForWorkspace(removed.uri.fsPath);
+            }
+        })
+    );
+
+    // --- Omniscient Telemetry Sink (System Events) ---
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument((e) => {
+            const linesChanged = e.contentChanges.reduce((acc, c) => acc + c.text.split('\n').length - 1 + (c.rangeLength > 0 ? 1 : 0), 0);
+            if (linesChanged > 0 || e.contentChanges.length > 0) {
+                ipcChannel.appendLine(`[ZENITH-OMNI] SYSTEM_EDIT: ${e.document.uri.fsPath} (${e.contentChanges.length} edits)`);
+            }
+        }),
+        vscode.window.onDidChangeActiveTextEditor((e) => {
+            if (e) {
+                ipcChannel.appendLine(`[ZENITH-OMNI] SYSTEM_FOCUS: switched to ${e.document.uri.fsPath}`);
             }
         })
     );
@@ -316,6 +331,14 @@ export async function activate(context: vscode.ExtensionContext) {
                 const result = await handle.rpc.call(method, targetId === '' ? [] : [targetId]);
                 
                 if (targetId === '') {
+                    // Onlook Parity: Force VS Code to re-read files if they are currently open
+                    // This ensures the "Source of Truth" in the IDE matches the visual edits instantly.
+                    const statPromises = vscode.workspace.textDocuments
+                        .filter(doc => doc.uri.scheme === 'file' && !doc.isDirty)
+                        .map(doc => vscode.workspace.fs.stat(doc.uri).then(() => {}, () => {}));
+                    
+                    await Promise.allSettled(statPromises);
+
                     handle.stagedCount = 0;
                 } else {
                     handle.stagedCount = Math.max(0, handle.stagedCount - 1);
@@ -327,16 +350,6 @@ export async function activate(context: vscode.ExtensionContext) {
                     workspaceRoot: root,
                     stagedCount: handle.stagedCount
                 });
-                return result;
-
-                // Onlook Parity: Force VS Code to re-read files if they are currently open
-                // This ensures the "Source of Truth" in the IDE matches the visual edits instantly.
-                const statPromises = vscode.workspace.textDocuments
-                    .filter(doc => doc.uri.scheme === 'file' && !doc.isDirty)
-                    .map(doc => vscode.workspace.fs.stat(doc.uri).then(() => {}, () => {}));
-                
-                await Promise.allSettled(statPromises);
-
                 return result;
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Zenith Commit Failed: ${err.message || err}`);
@@ -387,6 +400,16 @@ export async function activate(context: vscode.ExtensionContext) {
             void ensureSidecarForWorkspace(folder.uri.fsPath).catch(console.error);
         }
     }
+
+    // --- Status Polling Loop (tracked for proper disposal on deactivate) ---
+    const pollInterval = setInterval(() => {
+        for (const [root, handle] of activeSidecars) {
+            if (handle.state === 'ready') {
+                syncSidecarStatus(root).catch(() => {});
+            }
+        }
+    }, 5000);
+    context.subscriptions.push({ dispose: () => clearInterval(pollInterval) });
 
     // --- Update status bar for currently active file ---
     const activeRoot = vscode.window.activeTextEditor
@@ -454,16 +477,16 @@ async function syncSidecarStatus(root: string): Promise<number> {
     }
 }
 
-// --- Status Polling Loop (Fix #12) ---
-setInterval(() => {
-    for (const [root, handle] of activeSidecars) {
-        if (handle.state === 'ready') {
-            syncSidecarStatus(root).catch(() => {});
-        }
-    }
-}, 5000);
+// The polling interval is now started inside activate() and tracked for disposal.
+// See: context.subscriptions.push({ dispose: () => clearInterval(pollInterval) })
 
 function broadcastToWebviews(message: any) {
+    // --- Omniscient Telemetry Sink (Ext -> UI) ---
+    const payloadClone = { ...message };
+    if (payloadClone.text?.length > 100) payloadClone.text = payloadClone.text.slice(0, 100) + '...';
+    if (payloadClone.tree) payloadClone.tree = '[AST Tree...]';
+    ipcChannel.appendLine(`[ZENITH-OMNI] IPC_TX to Webview [${message.type}]: ${JSON.stringify(payloadClone)}`);
+
     activePanels.forEach(p => p.postMessage(message));
     sidebarProvider?.postMessage(message);
 }
@@ -669,14 +692,13 @@ export async function detectDevServers(): Promise<string[]> {
 
     const probes: Promise<string>[] = [];
     for (const port of COMMON_DEV_PORTS) {
-        // Double-check blacklist even if port is in the common list (Surgical Lockdown)
+        // Only probe 127.0.0.1 — faster (no DNS), and localhost resolves to the same address.
+        // Blacklist guard: skip reserved ports even if somehow in the list.
         if (port === 8080 || port === 8081 || port === 8082) continue;
-        
-        probes.push(probe('localhost', port));
         probes.push(probe('127.0.0.1', port));
     }
 
-    console.log(`[Zenith Detection] Probing ${COMMON_DEV_PORTS.length * 2} endpoints...`);
+    console.log(`[Zenith Detection] Probing ${COMMON_DEV_PORTS.length} endpoints on 127.0.0.1...`);
     
     const results = await Promise.allSettled(probes);
     const sites = results
@@ -924,10 +946,19 @@ async function detectTailwind(root: string): Promise<string | null> {
     return results.find(r => r !== null) ?? null;
 }
 
-function loadUserConfig(_configPath: string): ProjectConfig {
-    // User config file loading — for now return defaults; full implementation
-    // would use require() or ts-node to load the config
-    return { framework: 'Unknown', devServerUrl: 'http://127.0.0.1:3000', detectedSites: [], tsConfigPath: null, tailwindConfig: null, autoDetected: false };
+function loadUserConfig(configPath: string): ProjectConfig {
+    try {
+        const raw = fs.readFileSync(configPath, 'utf8');
+        // Extract key fields via regex (avoids needing ts-node/require for .ts files)
+        const frameworkMatch = raw.match(/framework:\s*['"]([^'"]+)['"]/);
+        const devServerMatch = raw.match(/devServerUrl:\s*['"]([^'"]+)['"]/);
+        const framework = frameworkMatch?.[1] ?? 'Unknown';
+        const devServerUrl = devServerMatch?.[1] ?? 'http://127.0.0.1:3000';
+        return { framework, devServerUrl, detectedSites: [], tsConfigPath: null, tailwindConfig: null, autoDetected: false };
+    } catch {
+        // Config file is unreadable — fall back to defaults
+        return { framework: 'Unknown', devServerUrl: 'http://127.0.0.1:3000', detectedSites: [], tsConfigPath: null, tailwindConfig: null, autoDetected: false };
+    }
 }
 
 async function writeAutoConfig(configPath: string, config: ProjectConfig): Promise<void> {
@@ -990,11 +1021,6 @@ function getWorkspaceRootForFile(filePath: string): string | undefined {
  * - If multiple folders and no hint → QuickPick
  */
 async function resolveTargetWorkspace(silent = false): Promise<string | undefined> {
-    // v3.15 Monorepo Hard-Lock: Always favor the demo project if present
-    if (MONOREPO_DEMO_LOCK && fs.existsSync(MONOREPO_DEMO_LOCK)) {
-        return MONOREPO_DEMO_LOCK;
-    }
-
     const folders = vscode.workspace.workspaceFolders ?? [];
 
     if (folders.length === 0) {
@@ -1147,6 +1173,11 @@ async function handleWebviewMessage(
     context: vscode.ExtensionContext
 ) {
     const command = message.command || message.type;
+    
+    // --- Omniscient Telemetry Sink (UI -> Ext -> Sidecar) ---
+    const payloadClone = { ...message };
+    if (payloadClone.content?.length > 100) payloadClone.content = payloadClone.content.slice(0, 100) + '...';
+    ipcChannel.appendLine(`[ZENITH-OMNI] IPC_RX from Webview [${command}]: ${JSON.stringify(payloadClone)}`);
 
     switch (command) {
         case 'ready':
@@ -1501,24 +1532,8 @@ async function handleWebviewMessage(
             }
             return;
 
-        case 'undo':
-            try {
-                webview.postMessage({ type: 'log', text: `Triggering File Undo...`, level: 'info' });
-                // Fall back to VS Code's native undo stack
-                await vscode.commands.executeCommand('undo');
-            } catch (e: any) {
-                webview.postMessage({ type: 'log', text: `Undo failed: ${e.message}`, level: 'error' });
-            }
-            return;
-
-        case 'redo':
-            try {
-                webview.postMessage({ type: 'log', text: `Triggering File Redo...`, level: 'info' });
-                await vscode.commands.executeCommand('redo');
-            } catch (e: any) {
-                webview.postMessage({ type: 'log', text: `Redo failed: ${e.message}`, level: 'error' });
-            }
-            return;
+        // NOTE: 'undo' and 'redo' are handled above (lines ~1264-1281) via vfs.undo/vfs.redo.
+        // The native VS Code editor undo was intentionally removed — it bypasses the sidecar.
 
         case 'zenithTextEdit':
             try {

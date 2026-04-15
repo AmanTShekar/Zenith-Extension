@@ -33,7 +33,7 @@ export interface ZenithIntent {
 declare const acquireVsCodeApi: () => VSCodeApi;
 
 class VSCodeBridge {
-  private vscode: VSCodeApi | null = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
+  private vscode: VSCodeApi | null = typeof (window as any).acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
   postMessage(msg: ZenithIpcMessage) {
     if (this.vscode) {

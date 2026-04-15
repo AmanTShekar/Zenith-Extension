@@ -1,16 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { 
-  useCanvasStore, 
-  useSystemStore, 
-  useSelectionStore, 
-  useExplorerStore 
-} from '../stores';
+import { useCanvasStore } from '../stores/useCanvasStore';
+import { useSystemStore } from '../stores/useSystemStore';
+import { useSelectionStore } from '../stores/useSelectionStore';
+import { useExplorerStore } from '../stores/useExplorerStore';
 import { clsx } from 'clsx';
 import { Layout as LayoutIcon } from 'lucide-react';
 
 import { useArtboardInteraction } from '../hooks/useArtboardInteraction';
 import { SelectionOverlay } from './SelectionOverlay';
 import { SpacingRulers } from './SpacingRulers';
+import { SnapGuides } from './SnapGuides';
 import { CanvasContextMenu } from './CanvasContextMenu';
 
 const ArtboardHeader: React.FC<{ title: string; w: number; h: number }> = ({ title, w, h }) => (
@@ -46,8 +45,9 @@ const Artboard: React.FC<{
   const hoverRect = useSelectionStore(state => state.hoverRect);
   const explorerActions = useExplorerStore(state => state.actions);
 
-  const { resizing, handleResizeStart } = useArtboardInteraction(iframeRef);
   const zoom = useCanvasStore(state => state.zoom);
+  const { interaction, guides, handleResizeStart, handleDragStart } = useArtboardInteraction(iframeRef, zoom);
+  const isDragging = useSelectionStore(state => state.isDragging);
 
   const handleMouseMove = (e: React.PointerEvent) => {
     if (previewMode || !iframeRef.current || e.buttons === 4) return; // 4 is middle button held
@@ -85,23 +85,30 @@ const Artboard: React.FC<{
     }
   }, [devServerUrl, sandboxPort]);
 
+  // Effect 1: Full reload ONLY when the sandbox URL changes (not on tool changes)
   useEffect(() => {
-    if (iframeRef.current) {
-        iframeRef.current.src = 'about:blank';
-        setTimeout(() => {
-            if (iframeRef.current) iframeRef.current.src = sandboxUrl;
-        }, 10);
-    }
-    iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSyncMode', selectMode: isSelectMode }, '*');
-  }, [isSelectMode, sandboxUrl]);
+    if (!sandboxUrl || !iframeRef.current) return;
+    iframeRef.current.src = 'about:blank';
+    const timer = setTimeout(() => {
+      if (iframeRef.current) iframeRef.current.src = sandboxUrl;
+    }, 10);
+    return () => clearTimeout(timer);
+  }, [sandboxUrl]);
 
-  const handleLoad = () => {};
+  // Effect 2: Sync interaction mode without reloading
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSyncMode', selectMode: isSelectMode }, '*');
+  }, [isSelectMode]);
+
+  const handleLoad = () => {
+    // Post mode sync reliably after iframe finishes loading
+    iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSyncMode', selectMode: isSelectMode }, '*');
+  };
 
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       const data = e.data;
       if (!data || typeof data !== 'object') return;
-      // ... sync logic remains same ...
       if (data.type === 'zenithTreeUpdate') explorerActions.setTree(data.tree);
       if (data.type === 'zenithHover' && !previewMode) {
           useSelectionStore.setState({ hoverRect: data.rect, hoverTag: data.tagName || data.element });
@@ -120,10 +127,28 @@ const Artboard: React.FC<{
             } 
           });
       }
+      if (data.type === 'zenithSceneBoundsUpdate' && !previewMode) {
+          (window as any).__ZENITH_SCENE_BOUNDS__ = data.bounds;
+      }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [explorerActions, previewMode]);
+
+  // Ghost sync bridge: forward throttled position updates to the iframe
+  // The ghost itself is just the SelectionOverlay; we sync position so the iframe
+  // can update any ghost-related CSS (e.g. debug outlines) without re-rendering React.
+  useEffect(() => {
+    const handleGhostCmd = (e: MessageEvent) => {
+      const data = e.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'zenithGhostSync') {
+        iframeRef.current?.contentWindow?.postMessage(data, '*');
+      }
+    };
+    window.addEventListener('message', handleGhostCmd);
+    return () => window.removeEventListener('message', handleGhostCmd);
+  }, [iframeRef]);
 
   useEffect(() => {
     const handlePreview = (e: CustomEvent<{ zenithId: string; property?: string; value?: string; styles?: Record<string, string> }>) => {
@@ -152,14 +177,28 @@ const Artboard: React.FC<{
           )} 
         />
         
-        {isSelectMode && !previewMode && (
-          <div className="absolute inset-0 pointer-events-none z-30">
-            {hoverRect && <SpacingRulers rect={hoverRect} color="#00f2ff" />}
-            {selectedRect && <SpacingRulers rect={selectedRect} color="#ff00ff" />}
-            <SelectionOverlay rect={hoverRect} color="#00f2ff" isHover />
-            <SelectionOverlay rect={selectedRect} color="#ff00ff" onResizeStart={handleResizeStart} />
-          </div>
-        )}
+         {isSelectMode && !previewMode && (
+           <div className="absolute inset-0 pointer-events-none z-30">
+             {hoverRect && <SpacingRulers rect={hoverRect} color="#00f2ff" />}
+             {selectedRect && <SpacingRulers rect={selectedRect} color="#ff00ff" />}
+             
+             {/* Alignment Guides for Smart Snapping */}
+             <SnapGuides guides={guides} artboardRect={{ width: w, height: h }} />
+             
+             <SelectionOverlay 
+               rect={hoverRect} 
+               color="#00f2ff" 
+               isHover 
+             />
+             <SelectionOverlay 
+               rect={selectedRect} 
+               color="#ff00ff" 
+               isDragging={isDragging}
+               onResizeStart={handleResizeStart}
+               onDragStart={handleDragStart} 
+             />
+           </div>
+         )}
       </div>
     </div>
   );
@@ -195,6 +234,18 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
     }
   }, [setPan, setZoom]);
 
+  // P-2 Fix: Track active panning listeners so they can be cleaned up on unmount
+  const panMoveRef = useRef<((e: PointerEvent) => void) | null>(null);
+  const panUpRef = useRef<((e: PointerEvent) => void) | null>(null);
+
+  // Cleanup panning listeners if component unmounts during a drag
+  useEffect(() => {
+    return () => {
+      if (panMoveRef.current) window.removeEventListener('pointermove', panMoveRef.current);
+      if (panUpRef.current) window.removeEventListener('pointerup', panUpRef.current);
+    };
+  }, []);
+
   // v11.7: Surgical Panning Engine (Middle Mouse + Space Drag)
   const startPanning = (e: React.PointerEvent) => {
     const isMiddleClick = e.button === 1;
@@ -213,11 +264,17 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
 
     const handlePointerUp = (em: PointerEvent) => {
       setIsPanning(false);
-      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      try {
+        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+      } catch { /* pointer may have already been released */ }
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      panMoveRef.current = null;
+      panUpRef.current = null;
     };
 
+    panMoveRef.current = handlePointerMove;
+    panUpRef.current = handlePointerUp;
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
   };

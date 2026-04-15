@@ -39,6 +39,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   isSpacePressed: false,
   sandboxPort: 3111,
   latency: 0,
+  previewMode: false,
   notifications: [],
   actions: {
     setConnectedServer: (connectedServer) => set({ connectedServer }),
@@ -52,7 +53,6 @@ export const useSystemStore = create<SystemState>((set) => ({
     setIsSpacePressed: (isSpacePressed) => set({ isSpacePressed }),
     setSandboxPort: (sandboxPort) => set({ sandboxPort }),
     setLatency: (latency) => set({ latency }),
-    previewMode: false,
     setPreviewMode: (previewMode: boolean) => set({ previewMode }),
     togglePreview: () => set((state) => ({ previewMode: !state.previewMode })),
     addNotification: (type, message) => {

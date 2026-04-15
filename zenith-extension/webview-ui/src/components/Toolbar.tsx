@@ -1,4 +1,5 @@
 import { clsx } from 'clsx';
+import { vscode } from '../bridge';
 import { useSelectionStore, useCanvasStore, useSystemStore } from '../stores';
 import { motion, AnimatePresence } from 'framer-motion';
 

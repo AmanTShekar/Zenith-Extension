@@ -40,6 +40,7 @@ interface SelectionState {
     top?: number; left?: number; right?: number; bottom?: number;
     parentRect?: { width: number; height: number };
   } | null;
+  isDragging: boolean;
   auditIssues: Array<{ level: 'warn' | 'error'; message: string; type: string }>;
   liveSave: boolean;
   stagedCount: number;
@@ -69,6 +70,7 @@ interface SelectionState {
     previewStyle: (property: string, value: string) => void;
     patchBatch: (styles: Record<string, string>) => void;
     previewBatch: (styles: Record<string, string>) => void;
+    setDragging: (isDragging: boolean) => void;
     deleteNode: (id: string) => void;
     duplicateNode: (id: string) => void;
     moveNode: (id: string, parentId: string, oldOrder: string[], newOrder: string[]) => void;
@@ -92,6 +94,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
   activeState: 'base',
   currentStack: [],
   measurementData: null,
+  isDragging: false,
   auditIssues: [],
   liveSave: false,
   stagedCount: 0,
@@ -99,6 +102,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
   historyIndex: 0,
   
   actions: {
+    setDragging: (isDragging) => set({ isDragging }),
     toggleLiveSave: () => set(state => ({ liveSave: !state.liveSave })),
     setStagedCount: (count) => set({ stagedCount: count }),
     setActiveState: (activeState) => set({ activeState }),
@@ -179,15 +183,17 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
     },
 
     previewBatch: (styles: Record<string, string>) => {
+      // No-op during drag: CSS vars drive the overlay directly.
+      // Dispatching events during drag would cause inspector re-renders every frame.
+      if (get().isDragging) return;
       const state = get();
       const newStyles = { ...state.computedStyles, ...styles };
       set({ computedStyles: newStyles });
 
-      Object.entries(styles).forEach(([property, value]) => {
-        window.dispatchEvent(new CustomEvent('zenith-preview-style', {
-          detail: { zenithId: state.selectedId, property, value }
-        }));
-      });
+      // P-4 Fix: Dispatch a single batched event instead of N individual events.
+      window.dispatchEvent(new CustomEvent('zenith-preview-style', {
+        detail: { zenithId: state.selectedId, styles }
+      }));
     },
 
     patchBatch: (styles: Record<string, string>) => {
