@@ -58,10 +58,10 @@ Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information o
 
 ## License
 
-Zenith is licensed under the **[Zenith Commercial & Source-Available License](LICENSE)**. 
+Zenith is licensed under the **[Zenith Public License (Apache 2.0 Hybrid)](LICENSE)**. 
 
-*   **Individuals**: Free for personal, non-commercial use and educational exploration.
-*   **Commercial**: Use by any for-profit entity or for commercial advantage requires a separate, written Commercial License from the creator.
+*   **Non-Commercial**: Governed by the permissive Apache 2.0 license—free to explore, modify, and share for personal or educational use.
+*   **Commercial & Profit**: Use for revenue-generating purposes or within a company requires express written consent from the creator. No profit-making is permitted without a separate commercial license.
 
 ## 🎨 Creator
 
