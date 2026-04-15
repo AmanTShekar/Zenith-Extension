@@ -58,16 +58,21 @@ Please see our [Contribution Guidelines](CONTRIBUTING.md) for more information o
 
 ## License
 
-Zenith is licensed under the **[Zenith Public License (Apache 2.0 Hybrid)](LICENSE)**. 
+Zenith is governed by the **[Zenith Public License (Airtight Apache 2.0 Hybrid)](LICENSE)**.
 
-*   **Non-Commercial**: Governed by the permissive Apache 2.0 license—free to explore, modify, and share for personal or educational use.
-*   **Commercial & Profit**: Use for revenue-generating purposes or within a company requires express written consent from the creator. No profit-making is permitted without a separate commercial license.
+### 🛡️ The Balanced Legal Model
+We believe in open exploration, but we protect our innovation. Zenith uses a unique "Bricked-Up" license structure:
+
+1.  **Non-Commercial (Apache 2.0)**: Individuals, students, and hobbyists are free to use, modify, and explore the code under the permissive Apache 2.0 terms.
+2.  **Commercial & Profit (Airtight Rider)**: Any use for monetary gain, revenue generation, or within a for-profit company is **strictly prohibited**. The [Commercial Rider](LICENSE) overrides all permissive grants for profit-making entities. This ensures the "Surgical AST Engine" and "VFS Bridge" stay protected.
+
+---
 
 ## 🎨 Creator
 
 Created with ❤️ by **[Aman T Shekar](https://github.com/AmanTShekar)**. 
 
-Join us in pushing the boundaries of how software is designed and built. For commercial licensing inquiries, please contact the creator directly.
+Join us in pushing the boundaries of how software is designed and built. For commercial licensing inquiries or express profit-making consent, please contact the creator directly.
 
 ---
 *Ready to build visually? Launch Zenith inside your workspace and start pointing, clicking, and building!*
