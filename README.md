@@ -30,10 +30,9 @@ By injecting a "Live Bridge" into your development server, we turn your running 
 
 Zenith is built on three main pillars designed for speed and reliability:
 
-<<<<<<< HEAD
 ### 1. The Sidecar Engine (Rust)
 =======
-### 1. The Sidecar Engine (Rust 🦀)
+### 1. The Sidecar Engine (Rust)
 
 >>>>>>> 3e158bc (docs: clean terminology and remove redundant text)
 The brain of Zenith. It manages a **Virtual File System (VFS)** and a **Write-Ahead Log (WAL)**. It ensures that every visual change is atomic and safe. By using Rust, we keep latency under 1ms, ensuring your design experience feels "instant."
