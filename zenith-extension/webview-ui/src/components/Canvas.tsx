@@ -73,6 +73,29 @@ const Artboard: React.FC<{
     useSelectionStore.setState({ hoverRect: null, hoverTag: null });
   };
 
+  const handleArtboardPointerDown = (e: React.PointerEvent) => {
+    if (!isSelectMode || previewMode || !selectedRect) return;
+    
+    // Convert click to local artboard space
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / zoom;
+    const y = (e.clientY - rect.top) / zoom;
+    
+    // Check if click is inside the selected element's bounds
+    // We add a tiny 4px buffer for easier manipulation
+    const buffer = 4;
+    const isInside = 
+      x >= selectedRect.x - buffer && 
+      x <= (selectedRect.x + selectedRect.width + buffer) &&
+      y >= selectedRect.y - buffer &&
+      y <= (selectedRect.y + selectedRect.height + buffer);
+      
+    if (isInside && e.button === 0) {
+      // It's a drag start!
+      handleDragStart(e);
+    }
+  };
+
   // Derive the sandbox URL
   const sandboxUrl = useMemo(() => {
     if (!devServerUrl) return '';
@@ -166,7 +189,11 @@ const Artboard: React.FC<{
         previewMode ? "rounded-none border-none shadow-none" : ""
     )}>
       {!previewMode && <ArtboardHeader title={title} w={w} h={h} />}
-      <div className="relative overflow-hidden" style={{ width: w, height: h }}>
+      <div 
+        className="relative overflow-hidden" 
+        style={{ width: w, height: h }}
+        onPointerDown={handleArtboardPointerDown}
+      >
         <iframe 
           ref={iframeRef} 
           src={sandboxUrl} 

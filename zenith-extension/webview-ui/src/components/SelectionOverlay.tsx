@@ -65,13 +65,9 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
         height: undefined,
       }}
     >
-      {/* Drag Surface (only for selected element) */}
-      {!isHover && onDragStart && (
-          <div 
-            onPointerDown={onDragStart}
-            className="absolute inset-0 cursor-move pointer-events-auto"
-          />
-      )}
+      {/* Drag Surface removed to allow deep selection (clicking through to children). 
+          Dragging is now handled by the Artboard wrapper in Canvas.tsx */}
+
 
       {/* Onlook Signature: High-Contrast Corner Brackets */}
       {!isHover && (

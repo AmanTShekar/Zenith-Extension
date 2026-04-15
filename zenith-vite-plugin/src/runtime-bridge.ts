@@ -135,6 +135,24 @@
         broadcastTree();
         break;
 
+      case 'zenithRequestSceneBounds': {
+        const elements = document.querySelectorAll('[data-zenith-id]');
+        const bounds = Array.from(elements).map(el => {
+          const rect = (el as HTMLElement).getBoundingClientRect();
+          return {
+            id: el.getAttribute('data-zenith-id'),
+            rect: {
+                x: rect.left,
+                y: rect.top,
+                width: rect.width,
+                height: rect.height
+            }
+          };
+        });
+        window.parent.postMessage({ type: 'zenithSceneBoundsUpdate', bounds }, '*');
+        break;
+      }
+
       case 'zenithSelect':
       case 'zenithForceSelect': {
         const el = m.id 

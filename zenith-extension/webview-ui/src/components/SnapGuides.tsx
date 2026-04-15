@@ -17,9 +17,9 @@ export const SnapGuides: React.FC<SnapGuidesProps> = ({ guides, artboardRect }) 
             x2={x}
             y2={artboardRect.height}
             stroke="#ff00ff"
-            strokeWidth="1"
-            strokeDasharray="2,2"
-            opacity="0.8"
+            strokeWidth="0.5"
+            strokeDasharray="4,2"
+            opacity="0.6"
           />
         ))}
         {guides.y.map((y, i) => (
@@ -30,9 +30,9 @@ export const SnapGuides: React.FC<SnapGuidesProps> = ({ guides, artboardRect }) 
             x2={artboardRect.width}
             y2={y}
             stroke="#ff00ff"
-            strokeWidth="1"
-            strokeDasharray="2,2"
-            opacity="0.8"
+            strokeWidth="0.5"
+            strokeDasharray="4,2"
+            opacity="0.6"
           />
         ))}
       </svg>

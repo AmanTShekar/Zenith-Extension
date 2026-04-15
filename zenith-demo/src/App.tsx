@@ -22,7 +22,7 @@ function App() {
               opacity: 1,
             }}
           >
-            hello Status
+            hello hello
           </h2>
           <div
             className="status-pill"

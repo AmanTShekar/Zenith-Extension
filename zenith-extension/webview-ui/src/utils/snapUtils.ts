@@ -14,7 +14,7 @@ export interface SnapResult {
   };
 }
 
-const SNAP_THRESHOLD = 5;
+const SNAP_THRESHOLD = 10;
 
 export function getSnapping(
   rect: Rect,
