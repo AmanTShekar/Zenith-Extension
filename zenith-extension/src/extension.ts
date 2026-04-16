@@ -44,6 +44,8 @@ interface SidecarHandle {
 
 const activeSidecars = new Map<string, SidecarHandle>();
 const activePanels = new Set<ZenithPanel>();
+const healingWorkspaces = new Set<string>();
+
 
 // --- UUID Generator (v5.0 Stability) ---
 function generateZenithUuid(): string {
@@ -302,22 +304,69 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }),
 
-        vscode.commands.registerCommand('zenith.engine.heal', async () => {
+        vscode.commands.registerCommand('zenith.engine.heal', async (source: string = 'manual') => {
             const root = await resolveTargetWorkspace(true);
             if (!root) return;
+            
+            // v12.6 Stabilization: Prevent concurrent/recursive healing
+            if (healingWorkspaces.has(root)) {
+                console.log(`[ZENITH-HEAL] Blocking redundant heal request for ${root} from source: ${source}`);
+                return;
+            }
+
             const handle = activeSidecars.get(root);
             if (!handle) return;
+            
             try {
-                console.log(`[ZENITH-RPC] EXEC zenith.engine.heal`);
+                healingWorkspaces.add(root);
+                console.log(`[ZENITH-RPC] EXEC zenith.engine.heal (Source: ${source})`);
                 await handle.rpc.call('vfs.heal', []);
-                handle.stagedCount = 0; // Reset count
-                broadcastToWebviews({ type: 'status', connected: true, stagedCount: 0 });
-                vscode.window.showInformationMessage('Zenith: System Healed. Staging layer has been reset.');
+                
+                // v12.6 Windows stability: Verify if heal actually cleared the Sidecar state
+                // Windows locks often block WAL truncation. We poll 3 times to ensure consistency.
+                let settled = false;
+                for (let i = 0; i < 3; i++) {
+                    await new Promise(r => setTimeout(r, 200));
+                    const currentCount = await syncSidecarStatus(root);
+                    if (currentCount === 0) {
+                        settled = true;
+                        break;
+                    }
+                }
+
+                if (!settled) {
+                    vscode.window.showWarningMessage(
+                        'Zenith: Heal partially blocked by Windows file-lock. Mutations might persist.',
+                        'Hard Reset Interface',
+                        'Dismiss'
+                    ).then(choice => {
+                        if (choice === 'Hard Reset Interface') {
+                            vscode.commands.executeCommand('zenith.restartSidecar', true); // Pass true for forcePurge
+                        }
+                    });
+                }
+
+                handle.stagedCount = 0; // Force sync
+                
+                // v12.5 Session Purity: Notify webviews to purge ghost state and reload the canvas
+                broadcastToWebviews({ type: 'zenithSessionHealed', stagedCount: 0 });
+                
+                updateStatusBar(root);
+                if (settled) {
+                    vscode.window.showInformationMessage('Zenith: System Healed. Staging layer has been reset.');
+                }
             } catch (err: any) {
                 vscode.window.showErrorMessage(`Healing failed: ${err.message}`);
                 throw err;
+            } finally {
+                // v12.6: RELEASE the lock so follow-up manual heals are possible
+                // We Wait 1s before release to debounce high-frequency calls from bridge
+                setTimeout(() => {
+                    healingWorkspaces.delete(root);
+                }, 1000);
             }
         }),
+
 
         vscode.commands.registerCommand('zenith.engine.commit', async (zenithId?: string) => {
             const root = await resolveTargetWorkspace(true);
@@ -332,7 +381,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 
                 if (targetId === '') {
                     // Onlook Parity: Force VS Code to re-read files if they are currently open
-                    // This ensures the "Source of Truth" in the IDE matches the visual edits instantly.
                     const statPromises = vscode.workspace.textDocuments
                         .filter(doc => doc.uri.scheme === 'file' && !doc.isDirty)
                         .map(doc => vscode.workspace.fs.stat(doc.uri).then(() => {}, () => {}));
@@ -340,6 +388,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     await Promise.allSettled(statPromises);
 
                     handle.stagedCount = 0;
+                    
+                    // v12.5: Notify webviews that changes are now foundational
+                    broadcastToWebviews({ type: 'zenithSessionCommitted', stagedCount: 0 });
                 } else {
                     handle.stagedCount = Math.max(0, handle.stagedCount - 1);
                 }
@@ -365,12 +416,20 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage('Zenith sidecar killed.');
         }),
 
-        vscode.commands.registerCommand('zenith.restartSidecar', async () => {
+        vscode.commands.registerCommand('zenith.restartSidecar', async (forcePurge: boolean = false) => {
             const root = await resolveTargetWorkspace(true);
             if (!root) return;
+            const handle = activeSidecars.get(root);
+            
             await shutdownSidecarForWorkspace(root);
+            
+            if (forcePurge && handle) {
+                console.log(`[Zenith] Initiating Force Purge for ${root}`);
+                await handle.manager.purgeStagedLayer();
+            }
+
             await ensureSidecarForWorkspace(root);
-            vscode.window.showInformationMessage('Zenith sidecar restarted.');
+            vscode.window.showInformationMessage(forcePurge ? 'Zenith sidecar force-restarted (WAL purged).' : 'Zenith sidecar restarted.');
         }),
 
         vscode.commands.registerCommand('zenith.engine.resolveConflict', async (choice: string) => {
@@ -459,6 +518,7 @@ async function syncSidecarStatus(root: string): Promise<number> {
         broadcastToWebviews({
             type: 'status',
             connected: true,
+            port: handle.manager.port,
             latency: handle.latencyMs,
             workspaceRoot: root,
             stagedCount: handle.stagedCount
@@ -530,17 +590,30 @@ async function ensureSidecarForWorkspace(workspaceRoot: string): Promise<void> {
 
     const configBasePort = zenithConfig().sidecarPort;
 
-    // Check if already ready
+    // v12.5 Industrial Lockdown: Strict singleton per workspace root
     const existing = activeSidecars.get(workspaceRoot);
-    if (existing && existing.state === 'ready') return;
+    if (existing) {
+        if (existing.state === 'ready') {
+             // Verify RPC is actually alive
+             try {
+                 await existing.rpc.call('sidecar/status', []);
+                 return; 
+             } catch {
+                 console.log(`[Zenith] Sidecar handle for ${workspaceRoot} is stale. Cleaning up.`);
+                 activeSidecars.delete(workspaceRoot);
+             }
+        } else if (existing.state === 'starting') {
+             return; // Avoid double starts
+        }
+    }
 
-    // v3.10 Hardening (EX1): Dynamic Port Allocation for Multi-Root
-    const port = await getAvailablePort(configBasePort);
+    // v3.10 Hardening (EX1): Reclamation over Drifting
+    // We only use getAvailablePort if we suspect this folder needs a unique identity (Secondary multi-root).
+    // For the primary workspace, we ALWAYS try to reclaim the config port.
+    const port = (vscode.workspace.workspaceFolders?.length === 1) ? configBasePort : await getAvailablePort(configBasePort);
 
-    // Check if already starting this specific root
-    // (ongoingStartups was using port as key, which was broken for multi-root)
-    const startupKey = `${workspaceRoot}:${port}`;
-    if (ongoingStartups.has(port)) return; // Still guard by port to prevent overlap
+    // v12.5: Never allow two sidecars for the same root even on different ports
+    if (ongoingStartups.has(port)) return; 
 
     const startup = (async () => {
         // Detect target port for the Sandbox Proxy (v11.0 Hardening)
@@ -1574,7 +1647,7 @@ async function handleWebviewMessage(
                 if (!handle) throw new Error('Not connected to sidecar');
                 webview.postMessage({ type: 'log', text: `[EXT] Triggering Autonomous Heal RPC...`, level: 'warn' });
                 
-                await vscode.commands.executeCommand('zenith.engine.heal');
+                await vscode.commands.executeCommand('zenith.engine.heal', message.source || 'webview');
                 
                 webview.postMessage({ type: 'healResult', success: true });
                 webview.postMessage({ type: 'log', text: `System Healed: Staging layer reset.`, level: 'success' });
@@ -1582,6 +1655,7 @@ async function handleWebviewMessage(
                 webview.postMessage({ type: 'healResult', success: false, error: e.message });
             }
             return;
+
 
         case 'runDeepAudit':
             // v5.5: Standardized forwarding to zenithForwardToFrame for bridge parity

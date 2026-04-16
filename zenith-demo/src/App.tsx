@@ -11,15 +11,16 @@ function App() {
         <section className="surgical-card">
           <h2
             style={{
-              textTransform: "",
-              overflow: "visible",
+              position: "relative",
               fontFamily: "",
               gap: "normal",
-              height: "32px",
-              left: "153px",
-              top: "217px",
-              width: "503px",
+              height: "81px",
+              left: "0px",
               opacity: 1,
+              overflow: "visible",
+              textTransform: "",
+              top: "0px",
+              width: "147px",
             }}
           >
             hello hello

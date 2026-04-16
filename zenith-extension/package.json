@@ -64,7 +64,7 @@
         },
         "zenith.sidecarPort": {
           "type": "number",
-          "default": 8082,
+          "default": 8083,
           "description": "Port for the Zenith Sidecar JSON-RPC server."
         },
         "zenith.showWelcome": {

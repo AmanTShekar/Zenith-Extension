@@ -79,12 +79,8 @@ export class SidecarManager {
     }
 
     public async start(): Promise<void> {
-        if (await this.isPortInUse(this.port)) {
-            console.log(`Port ${this.port} already in use. Skipping spawn.`);
-            return;
-        }
-
         // Build platform-correct binary name
+
         const binaryName = process.platform === 'win32' ? 'zenith-sidecar.exe' : 'zenith-sidecar';
         const debugDir = path.join('target', 'debug', binaryName);
 
@@ -113,6 +109,35 @@ export class SidecarManager {
         outputChannel.appendLine(`[Manager] Spawning sidecar: ${sidecarPath}`);
         outputChannel.appendLine(`[Manager] Workspace: ${this.workspaceRoot}`);
         outputChannel.show();
+
+        // v12.6 Targeted Lockdown: Only kill processes holding OUR specific port
+        // This avoids the 'Zombie War' where multiple folders kill each other's sidecars.
+        if (process.platform === 'win32') {
+            try {
+                const stdout = cp.execSync(`netstat -ano | findstr :${this.port}`, { encoding: 'utf8' });
+                const lines = stdout.split('\n');
+                for (const line of lines) {
+                    if (line.includes('LISTENING')) {
+                        const parts = line.trim().split(/\s+/);
+                        const pid = parts[parts.length - 1];
+                        if (pid && pid !== '0') {
+                            outputChannel.appendLine(`[Manager] Clearing port ${this.port} (PID: ${pid})...`);
+                            try {
+                                cp.execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' });
+                            } catch (e) {
+                                outputChannel.appendLine(`[Manager] Taskkill failed (already dead?): ${e}`);
+                            }
+                        }
+                    }
+                }
+                outputChannel.appendLine(`[Manager] Port cleanup requested. Waiting 250ms for socket release...`);
+                await new Promise(r => setTimeout(r, 250));
+                outputChannel.appendLine(`[Manager] Port cleanup cycle complete.`);
+            } catch {
+                // netstat fails if port is totally free, which is fine
+            }
+        }
+
 
         // Always kill any orphan before spawning — safe to call even on clean starts
         await killOrphanSidecar(this.workspaceRoot);
@@ -241,16 +266,54 @@ export class SidecarManager {
                     }
                 });
             } else if (text.includes('ZENITH_ALREADY_RUNNING')) {
-                vscode.window.showErrorMessage(
-                    'Zenith is already running for this workspace.',
-                    'Kill Existing Sidecar',
-                    'Dismiss'
-                ).then(choice => {
-                    if (choice === 'Kill Existing Sidecar') {
-                        vscode.commands.executeCommand('zenith.killSidecar');
-                    }
-                });
+                outputChannel.appendLine(`[Manager] ZENITH_ALREADY_RUNNING detected. Searching for zombie processes for workspace: ${this.workspaceRoot}`);
+                
+                if (process.platform === 'win32') {
+                    // Fix #42 & #43: Kill by workspace path to clear Named Pipes (Ghost Proxy)
+                    // We search for zenith-sidecar.exe with the specific workspace in the command line
+                    const normalizedRoot = this.workspaceRoot.replace(/\\/g, '\\\\');
+                    const wmicCmd = `wmic process where "name='zenith-sidecar.exe' and commandline like '%${normalizedRoot}%'" get processid`;
+                    
+                    cp.exec(wmicCmd, (err, stdout) => {
+                        if (!err && stdout) {
+                            const pids = stdout.split('\n')
+                                .map(line => line.trim())
+                                .filter(line => line && !line.toLowerCase().includes('processid'))
+                                .map(line => line.split(/\s+/)[0])
+                                .filter(pid => pid && !isNaN(parseInt(pid)));
+
+                            if (pids.length > 0) {
+                                outputChannel.appendLine(`[Manager] Found ${pids.length} zombie sidecars. Terminating...`);
+                                for (const pid of pids) {
+                                    try { cp.execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' }); } catch {}
+                                }
+                            }
+                        }
+
+                        // Also check port 8083 just in case
+                        cp.exec(`netstat -ano | findstr :${this.port}`, (err, stdoutPort) => {
+                            if (!err && stdoutPort) {
+                                const portPids = stdoutPort.split('\n')
+                                    .map(line => line.trim().split(/\s+/).pop())
+                                    .filter(pid => pid && pid !== '0' && !isNaN(parseInt(pid)));
+                                for (const pid of portPids) {
+                                    try { cp.execSync(`taskkill /F /PID ${pid} /T`, { stdio: 'ignore' }); } catch {}
+                                }
+                            }
+
+                            this.process?.kill('SIGKILL');
+                            setTimeout(() => {
+                                outputChannel.appendLine(`[Manager] Attempting clean restart...`);
+                                this.start();
+                            }, 1500);
+                        });
+                    });
+                } else {
+                    this.process?.kill('SIGKILL');
+                    setTimeout(() => this.start(), 1500);
+                }
             } else if (text.includes('ZENITH_ERROR')) {
+
                 const detail = text.replace('ZENITH_ERROR:', '').trim();
                 vscode.window.showErrorMessage(`Zenith sidecar error: ${detail}`);
             } else {
@@ -272,6 +335,20 @@ export class SidecarManager {
 
         // Wait a bit for the server to start
         await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    public async purgeStagedLayer(): Promise<boolean> {
+        const walPath = path.join(this.workspaceRoot, '.zenith', 'staged.wal');
+        try {
+            if (fs.existsSync(walPath)) {
+                fs.unlinkSync(walPath);
+                console.log(`[SidecarManager] Manually purged staged layer: ${walPath}`);
+                return true;
+            }
+        } catch (err) {
+            console.error(`[SidecarManager] Failed to purge staged layer:`, err);
+        }
+        return false;
     }
 
     public async stop(): Promise<void> {

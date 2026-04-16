@@ -406,7 +406,12 @@ async fn main() {
             }
         }).await {
             error!("[SIDECAR] Ghost-Proxy server failed: {}", e);
+            if e.to_string().contains("ZENITH_ALREADY_RUNNING") {
+                error!("[SIDECAR] FATAL: Another Zenith instance is already serving this workspace. Exiting to prevent WAL corruption.");
+                std::process::exit(1);
+            }
         }
+
         info!("Ghost-Proxy background task initialized (IPC port encrypted)");
     });
  

@@ -44,7 +44,12 @@ interface SelectionState {
   auditIssues: Array<{ level: 'warn' | 'error'; message: string; type: string }>;
   liveSave: boolean;
   stagedCount: number;
-  history: Array<Record<string, string>>;
+  history: Array<{ 
+    label: string; 
+    styles?: Record<string, string>; 
+    type?: string;
+    timestamp: number;
+  }>;
   historyIndex: number;
   
   actions: {
@@ -76,10 +81,13 @@ interface SelectionState {
     moveNode: (id: string, parentId: string, oldOrder: string[], newOrder: string[]) => void;
     groupNodes: (ids: string[], containerTag: string) => void;
     commitAll: () => void;
+    clearCommits: () => void;
     undo: () => void;
     redo: () => void;
   };
 }
+
+const MAX_HISTORY_LENGTH = 50;
 
 export const useSelectionStore = create<SelectionState>((set, get) => ({
   selectedId: null,
@@ -98,8 +106,8 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
   auditIssues: [],
   liveSave: false,
   stagedCount: 0,
-  history: [{}],
-  historyIndex: 0,
+  history: [],
+  historyIndex: -1,
   
   actions: {
     setDragging: (isDragging) => set({ isDragging }),
@@ -117,7 +125,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         currentStack,
         fiberInfo: fiberInfo || null,
         elementSignature: null,
-        history: [normalizedStyles],
+        history: [{ label: 'Baseline', styles: normalizedStyles, timestamp: Date.now() }],
         historyIndex: 0,
         activeState: 'base',
         stateStyles: { base: {}, hover: {}, focus: {}, active: {}, disabled: {} }
@@ -133,33 +141,43 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         selectedId: null,
         elementInfo: null,
         currentStack: [],
-        history: [normalizedStyles],
+        history: [{ label: 'Baseline', styles: normalizedStyles, timestamp: Date.now() }],
         historyIndex: 0,
         activeState: 'base',
         stateStyles: { base: {}, hover: {}, focus: {}, active: {}, disabled: {} }
       });
     },
 
+
     setHover: (hoverRect, tag) => set({ hoverRect, hoverTag: tag ?? null }),
     setRect: (rect) => set({ rect }),
     
-    patchStyle: (property, value) => {
+    patchStyle: (property, propertyValue) => {
       const state = get();
       const activeState = state.activeState;
-      const newStyles = { ...state.computedStyles, [property]: value };
+      const newStyles = { ...state.computedStyles, [property]: propertyValue };
       
-      const newHistory = state.history.slice(0, state.historyIndex + 1);
-      newHistory.push(newStyles);
+      let newHistory = state.history.slice(0, state.historyIndex + 1);
+      newHistory.push({
+        label: `Set ${property} to ${propertyValue}`,
+        styles: newStyles,
+        timestamp: Date.now()
+      });
       
+      // Enforce Photoshop-style memory limits
+      if (newHistory.length > MAX_HISTORY_LENGTH) {
+        newHistory = newHistory.slice(-MAX_HISTORY_LENGTH);
+      }
+
       const newStateStyles = { ...state.stateStyles };
-      newStateStyles[activeState] = { ...newStateStyles[activeState], [property]: value };
+      newStateStyles[activeState] = { ...newStateStyles[activeState], [property]: propertyValue };
 
       set({ 
         computedStyles: newStyles,
         stateStyles: newStateStyles,
         history: newHistory,
         historyIndex: newHistory.length - 1,
-        stagedCount: state.stagedCount + 1 // Optimistic Increment
+        stagedCount: state.stagedCount + 1 
       });
 
       vscode.postMessage({
@@ -167,7 +185,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         zenithId: state.selectedId,
         signature: state.elementSignature,
         property,
-        value,
+        value: propertyValue,
         interactionState: activeState,
       });
     },
@@ -183,14 +201,11 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
     },
 
     previewBatch: (styles: Record<string, string>) => {
-      // No-op during drag: CSS vars drive the overlay directly.
-      // Dispatching events during drag would cause inspector re-renders every frame.
       if (get().isDragging) return;
       const state = get();
       const newStyles = { ...state.computedStyles, ...styles };
       set({ computedStyles: newStyles });
 
-      // P-4 Fix: Dispatch a single batched event instead of N individual events.
       window.dispatchEvent(new CustomEvent('zenith-preview-style', {
         detail: { zenithId: state.selectedId, styles }
       }));
@@ -200,8 +215,17 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       const state = get();
       const newStyles = { ...state.computedStyles, ...styles };
       
-      const newHistory = state.history.slice(0, state.historyIndex + 1);
-      newHistory.push(newStyles);
+      let newHistory = state.history.slice(0, state.historyIndex + 1);
+      const props = Object.keys(styles);
+      newHistory.push({
+        label: props.length > 2 ? `Batch update ${props.length} styles` : `Update ${props.join(', ')}`,
+        styles: newStyles,
+        timestamp: Date.now()
+      });
+      
+      if (newHistory.length > MAX_HISTORY_LENGTH) {
+        newHistory = newHistory.slice(-MAX_HISTORY_LENGTH);
+      }
       
       const newStateStyles = { ...state.stateStyles };
       const activeState = state.activeState;
@@ -212,7 +236,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         stateStyles: newStateStyles,
         history: newHistory,
         historyIndex: newHistory.length - 1,
-        stagedCount: state.stagedCount + Object.keys(styles).length // Optimistic Increment
+        stagedCount: state.stagedCount + Object.keys(styles).length 
       });
 
       vscode.postMessage({
@@ -245,14 +269,16 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       const state = get();
       if (state.historyIndex > 0) {
         const nextIndex = state.historyIndex - 1;
-        const prevStyles = state.history[nextIndex];
+        const entry = state.history[nextIndex];
+        const prevStyles = entry.styles || {};
         set({ computedStyles: prevStyles, historyIndex: nextIndex });
         
         vscode.postMessage({
           type: 'zenithBatchPatch',
           zenithId: state.selectedId,
           signature: state.elementSignature,
-          styles: prevStyles
+          styles: prevStyles,
+          isUndo: true
         });
       }
     },
@@ -261,20 +287,60 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       const state = get();
       if (state.historyIndex < state.history.length - 1) {
         const nextIndex = state.historyIndex + 1;
-        const nextStyles = state.history[nextIndex];
+        const entry = state.history[nextIndex];
+        const nextStyles = entry.styles || {};
         set({ computedStyles: nextStyles, historyIndex: nextIndex });
 
         vscode.postMessage({
           type: 'zenithBatchPatch',
           zenithId: state.selectedId,
           signature: state.elementSignature,
-          styles: nextStyles
+          styles: nextStyles,
+          isRedo: true
         });
       }
     },
 
     commitAll: () => {
       vscode.postMessage({ type: 'commitAll' });
+      // Reset history on commit as the current state is now the "base"
+      set({ 
+        stagedCount: 0,
+        history: get().selectedId ? [{ label: 'Baseline', styles: get().computedStyles, timestamp: Date.now() }] : [],
+        historyIndex: get().selectedId ? 0 : -1
+      });
+    },
+
+    jumpToHistory: (index: number) => {
+      const state = get();
+      if (index >= 0 && index < state.history.length) {
+        const entry = state.history[index];
+        const styles = entry.styles || {};
+        set({ computedStyles: styles, historyIndex: index });
+
+        vscode.postMessage({
+          type: 'zenithBatchPatch',
+          zenithId: state.selectedId,
+          signature: state.elementSignature,
+          styles,
+          isJump: true
+        });
+      }
+    },
+    discardLocalChanges: () => {
+      // v12.6 Stabilization: Pure state reset — DO NOT trigger healSession IPC here
+      set({ 
+        stagedCount: 0,
+        history: [],
+        historyIndex: -1,
+        computedStyles: {},
+        stateStyles: { base: {}, hover: {}, focus: {}, active: {}, disabled: {} }
+      });
+    },
+    requestHeal: (source: string = 'unknown') => {
+      // v12.6 Stabilization: Dedicated IPC trigger for manual healing
+      vscode.postMessage({ type: 'healSession', source });
     }
   }
 }));
+

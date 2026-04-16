@@ -157,15 +157,33 @@ impl WalWriter {
         // 3. Re-initialize the Buffered writer regardless of truncation success
         // if truncation failed after all retries, we still have a working file handle
         // and can continue staging in-memory and logging to the tail of the wal.
-        self.file = Some(BufWriter::new(file));
-        self.entries_since_sync = 0;
-        
         if success {
+            self.file = Some(BufWriter::new(file));
+            self.entries_since_sync = 0;
             info!("WAL truncated in-place (v11.7.6 Windows hardening)");
             Ok(())
         } else {
-            warn!("  ⚠️ WAL truncation failed after 5 attempts. Log remains bloated but operational.");
-            Ok(())
+            warn!("  ⚠️ WAL truncation failed after 5 attempts. Attempting Fresh Start strategy...");
+
+            // 4. Fresh Start Strategy: Close current handle, rename-move the bloat, and create new
+            drop(file); // Release handle explicitly
+            self.file = None;
+
+            let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+            let bloat_path = self.path.with_extension(format!("bloat-{}", timestamp));
+
+            if let Err(e) = std::fs::rename(&self.path, &bloat_path) {
+                warn!("  ❌ Fresh Start failed: Could not rename locked WAL: {}", e);
+                // Last ditch: Re-open the original file so we can at least continue logging
+                let file = OpenOptions::new().write(true).append(true).open(&self.path)?;
+                self.file = Some(BufWriter::new(file));
+                Ok(())
+            } else {
+                info!("  ✅ Fresh Start success: Moved bloated WAL to {}. Starting fresh.", bloat_path.display());
+                let file = OpenOptions::new().create(true).write(true).append(true).open(&self.path)?;
+                self.file = Some(BufWriter::new(file));
+                Ok(())
+            }
         }
     }
 }
