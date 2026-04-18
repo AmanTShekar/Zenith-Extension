@@ -54,8 +54,14 @@ fresh_target/
 # Purged Content (Keep Local Only)
 audits/
 ZENITH_FULL_PROJECT_HISTORY.md
+ZENITH_SYSTEM_OVERVIEW.md
 ZENITH_V2_ARCHITECTURE_DEBATE.md
 check_output.txt
 test_harness.html
 _archive/
 *.map
+
+# Demo Projects (Keep Local Only)
+zenith-demo/
+website/
+space-scroll-demo/
