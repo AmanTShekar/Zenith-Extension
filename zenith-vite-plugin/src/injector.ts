@@ -70,7 +70,10 @@ export function injectGhostIds(
   attribute: string = DEFAULT_ATTRIBUTE
 ): InjectionResult {
   // Normalize path separators (Windows → forward slashes)
-  const normalizedPath = filePath.replace(/\\/g, "/");
+  let normalizedPath = filePath.replace(/\\/g, "/");
+  if (process.platform === 'win32') {
+    normalizedPath = normalizedPath.toLowerCase();
+  }
 
   // Step 0: Check Cache for Idempotency
   const hash = createHash('sha256').update(source).digest('hex');

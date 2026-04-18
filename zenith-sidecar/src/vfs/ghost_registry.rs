@@ -13,7 +13,11 @@ use sha2::{Sha256, Digest};
 use crate::types::ZenithId;
 
 pub fn normalize_path(path: &str) -> String {
-    path.replace('\\', "/").trim_start_matches('/').to_string()
+    let mut p = path.replace('\\', "/").trim_start_matches('/').to_string();
+    if cfg!(windows) {
+        p = p.to_lowercase();
+    }
+    p
 }
 
 /// v3.7 Base62 Encoder — Maps 72 bits (9 bytes) to 12 base62 characters.
@@ -45,7 +49,8 @@ pub fn encode_base62(bytes: &[u8]) -> String {
 /// SHA-256 (File:Line:Col) -> 72-bit prefix -> Base62
 pub fn generate_ghost_id(file: &str, line: u32, col: u32) -> ZenithId {
     let mut hasher = Sha256::new();
-    hasher.update(file.as_bytes());
+    // GR-X Hardening: Always use normalized (lowercased on Windows) path for hashing
+    hasher.update(normalize_path(file).as_bytes());
     hasher.update(b":");
     hasher.update(line.to_string().as_bytes());
     hasher.update(b":");
@@ -121,6 +126,14 @@ impl GhostRegistry {
         let mut reverse_map: HashMap<(String, u32, u32), ZenithId> = HashMap::new();
         for (id, entry) in data.iter_mut() {
             entry.file = normalize_path(&entry.file);
+            
+            // GR-X Hardening: Skip collision check for (0, 0) positions.
+            // Multiple "soft-discovered" ghosts in a split file can coexist at 0:0
+            // until the Vite plugin registers their precise AST positions via shadow-registration.
+            if entry.line == 0 && entry.column == 0 {
+                continue;
+            }
+
             let key = (entry.file.clone(), entry.line, entry.column);
             if let Some(existing_id) = reverse_map.get(&key) {
                 if existing_id != id {
@@ -167,6 +180,21 @@ impl GhostRegistry {
             self.entries.insert(entry.id.clone(), entry);
         }
         info!("[SIDECAR] Manifest received (incremental RPC) — total {} entries", self.entries.len());
+    }
+
+    /// Convert the registry to a GhostIndex for persistence.
+    pub fn to_index(&self) -> GhostIndex {
+        let mut index = GhostIndex::new();
+        for entry in self.entries.values() {
+            let file = entry.file.clone();
+            let index_entry = index.files.entry(file).or_insert_with(|| GhostIndexEntry {
+                mtime_ms: 0, // Will be filled by scan_project
+                content_hash: 0,
+                entries: Vec::new(),
+            });
+            index_entry.entries.push(entry.clone());
+        }
+        index
     }
 
     /// Get all registered entries.

@@ -62,6 +62,7 @@ tempfile = "3"
 
 # File watching
 notify = "7"
+walkdir = "2"
 
 # Shared memory (SAB interop)
 memmap2 = "0.9"

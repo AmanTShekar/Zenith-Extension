@@ -35,6 +35,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use tracing::{debug, info, warn};
+use walkdir::WalkDir;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VfsError {
@@ -281,9 +282,138 @@ impl VirtualFileSystem {
 
     /// Read file from physical disk and update VFS base layer.
     pub fn load_file_from_disk(&mut self, path: &Path) -> Result<()> {
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file for VFS load: {:?}", path))?;
         self.load_file(path.to_path_buf(), content);
         Ok(())
+    }
+
+    /// Recursive Project Crawler (v12.6): Indexes the workspace on startup.
+    /// This resolves the "Cold-Start" VFS issue and "Split-File Blindness".
+    /// 
+    /// Matches extensions: .ts, .tsx, .js, .jsx, .html, .css
+    /// Ignores: node_modules, .git, .zenith, dist, target
+    pub fn scan_project(&mut self, root: &Path) -> Result<()> {
+        info!("[VFS] Initiating project crawl — root={:?}", root);
+        let start = std::time::Instant::now();
+        let mut count = 0;
+        let mut ghost_count = 0;
+
+        let walker = walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+                name != "node_modules" && name != ".git" && name != ".zenith" && name != "dist" && name != "target"
+            });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                
+                if matches!(ext, "ts" | "tsx" | "js" | "jsx" | "html" | "css") {
+                    if let Ok(rel_path) = path.strip_prefix(root) {
+                        if let Ok(content) = std::fs::read_to_string(path) {
+                            // Standardize path for VFS key
+                            let norm_rel = ghost_registry::normalize_path(&rel_path.to_string_lossy());
+                            let norm_path = PathBuf::from(norm_rel);
+                            
+                            self.load_file(norm_path.clone(), content.clone());
+                            count += 1;
+
+                            // Self-Warmup: Discover existing Ghost IDs in the file
+                            let discovered = self.discover_ghosts_in_file(&norm_path, &content);
+                            if !discovered.is_empty() {
+                                ghost_count += discovered.len();
+                                self.ghost_registry.register_entries(discovered);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        info!("[VFS] Crawl complete — indexed {} files, discovered {} ghosts in {:?}", count, ghost_count, start.elapsed());
+        Ok(())
+    }
+
+    /// Regex-based Ghost Discovery (v12.6): Scans raw source for data-zenith-id.
+    /// This enables the Component Tree to populate on cold start without waiting for HMR.
+    /// 
+    /// v3.12: Enhanced with "Soft Discovery" for standard React/Vue components.
+    fn discover_ghosts_in_file(&self, rel_path: &Path, content: &str) -> Vec<GhostEntry> {
+        let mut entries = Vec::new();
+        let file_str = ghost_registry::normalize_path(&rel_path.to_string_lossy());
+
+        // 1. Hard Discovery: Regexp for existing data-zenith-id
+        let re_id = regex::Regex::new(r#"data-zenith-id="(?P<id>[^"]+)""#).unwrap();
+        let mut seen_ids = HashSet::new();
+        
+        for cap in re_id.captures_iter(content) {
+            let ghost_id = cap["id"].to_string();
+            seen_ids.insert(ghost_id.clone());
+            
+            let tag_name = if let Some(parts) = ghost_id.split(':').last() {
+                parts.split('.').next().unwrap_or("unknown").to_string()
+            } else {
+                "unknown".to_string()
+            };
+
+            entries.push(GhostEntry {
+                id: ghost_id,
+                tag_name,
+                file: file_str.clone(),
+                line: 0,
+                column: 0,
+                is_logic_locked: content.contains("data-zenith-logic-locked=\"true\""),
+            });
+        }
+
+        // 2. Soft Discovery: Detect potential component boundaries
+        // Matches: export default function App, function MyComponent(), const Header = () =>
+        let re_soft = regex::Regex::new(r#"(?:export\s+(?:default\s+)?)?(?:function|const)\s+(?P<name>[A-Z][a-zA-Z0-9]*)\s*(?:=|[(])"#).unwrap();
+        
+        for cap in re_soft.captures_iter(content) {
+            let name = cap["name"].to_string();
+            // Deterministic ID for potential ghosts: file#ComponentName
+            let soft_id = format!("{}#{}", file_str, name);
+            
+            if !seen_ids.contains(&soft_id) {
+                entries.push(GhostEntry {
+                    id: soft_id,
+                    tag_name: "Component".to_string(),
+                    file: file_str.clone(),
+                    line: 0,
+                    column: 0,
+                    is_logic_locked: false,
+                });
+            }
+        }
+
+        entries
+    }
+
+    /// Persist the current Ghost Registry to disk (v12.6 Hardening).
+    pub fn save_registry(&self, zenith_dir: &Path, custom_index_path: Option<PathBuf>) -> Result<()> {
+        let mut index = self.ghost_registry.to_index();
+        
+        // Populate hashes and mtimes from current VFS state if available
+        for (file, entry) in index.files.iter_mut() {
+            let path = PathBuf::from(file);
+            if let Some(snapshot) = self.base.get(&path) {
+                entry.content_hash = snapshot.hash;
+            }
+            
+            // Try to get real mtime from disk
+            let full_path = zenith_dir.parent().unwrap_or(Path::new(".")).join(&path);
+            if let Ok(meta) = std::fs::metadata(&full_path) {
+                if let Ok(modified) = meta.modified() {
+                    entry.mtime_ms = modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+                }
+            }
+        }
+
+        index.save(zenith_dir, custom_index_path)
     }
 
     /// Autonomous Heal: Clears all staging state and truncates the WAL.
@@ -346,6 +476,15 @@ impl VirtualFileSystem {
         project_root: &Path,
     ) -> Result<()> {
         info!("[VFS] stage_universal — tx={tx} signature={:?} property={property} value=\"{value}\"", signature);
+
+        // v12.6: JIT Project Indexing — if memory is cold, prime it by scanning the root
+        if self.base.is_empty() {
+            info!("[VFS] Universal cache miss (cold) — initiating background crawl of {:?}", project_root);
+            if let Err(e) = self.scan_project(project_root) {
+                warn!("[VFS] Project crawl failed: {}", e);
+            }
+        }
+
         let mut target_file = None;
         let mut best_pos = None;
 

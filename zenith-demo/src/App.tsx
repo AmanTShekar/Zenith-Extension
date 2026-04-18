@@ -11,16 +11,16 @@ function App() {
         <section className="surgical-card">
           <h2
             style={{
-              position: "relative",
               fontFamily: "",
               gap: "normal",
-              height: "81px",
-              left: "0px",
               opacity: 1,
               overflow: "visible",
               textTransform: "",
+              height: "32px",
+              left: "0px",
+              position: "relative",
               top: "0px",
-              width: "147px",
+              width: "424px",
             }}
           >
             hello hello
@@ -56,7 +56,7 @@ function App() {
         </section>
 
         <section className="surgical-card">
-          <h2>Interactive Test</h2>
+          <h2>Interactive hello</h2>
           <p
             style={{
               marginBottom: "24px",
@@ -72,6 +72,7 @@ function App() {
             style={{
               fontFamily: "Roboto, sans-serif",
               opacity: 1,
+              backgroundColor: "#ffffff",
             }}
           >
             Counter: {count}

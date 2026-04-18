@@ -5,6 +5,7 @@
 import path from "node:path";
 import net from "node:net";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import type { Plugin, ResolvedConfig } from "vite";
 import WebSocket from "ws";
 import { injectGhostIds } from "./injector.js";
@@ -25,12 +26,12 @@ function workspaceHash(root: string): string {
 }
 
 let sidecarPipe: string | null = null;
-// [W1] Audit Fix: 20ms was too aggressive for Windows named pipe cold-connect (30-80ms).
-// 50ms is safe across all platforms while still being fast enough to avoid build delays.
-const PROXY_TIMEOUT_MS = process.platform === 'win32' ? 50 : 20;
+// [W1] Audit Fix: 50ms was still hitting race conditions on Windows under high file count.
+// 200ms provides enough headroom for the OS to handle concurrent pipe connects.
+const PROXY_TIMEOUT_MS = process.platform === 'win32' ? 200 : 50;
 
 // [O2] Audit Fix: Content-hash cache to skip redundant Ghost-ID injection on HMR cycles
-const _transformCache = new Map<string, { hash: number; result: any }>();
+const _transformCache = new Map<string, { hash: string; result: any }>();
 function fnv1a32(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -135,7 +136,7 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
                 if (entry.name !== 'node_modules' && entry.name !== '.git' && entry.name !== 'dist') {
                   scan(fullPath);
                 }
-              } else if (JSX_EXTENSIONS.test(entry.name)) {
+              } else if (/\.(jsx|tsx|ts|js|css|html)$/.test(entry.name)) {
                 files.push(fullPath);
               }
             }
@@ -146,7 +147,10 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
 
         for (const file of files) {
           try {
-            const relativePath = path.relative(projectRoot, file).replace(/\\/g, '/');
+            let relativePath = path.relative(projectRoot, file).replace(/\\/g, '/');
+            if (process.platform === 'win32') {
+              relativePath = relativePath.toLowerCase();
+            }
             const source = fs.readFileSync(file, 'utf-8');
             const result = injectGhostIds(source, relativePath, attrName);
             
@@ -214,9 +218,21 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
       if (shadow) await shadow.clean();
     },
     async transform(code: string, id: string) {
-      if (!JSX_EXTENSIONS.test(id) || id.includes("node_modules")) return null;
-      const relativePath = path.relative(projectRoot, id).replace(/\\/g, '/');
+      if (id.includes("node_modules")) return null;
+      let relativePath = path.relative(projectRoot, id).replace(/\\/g, '/');
+      if (process.platform === 'win32') {
+        relativePath = relativePath.toLowerCase();
+      }
 
+      // [O2] Audit Fix: Content-hash cache
+      const contentHash = createHash('sha256').update(code).digest('hex');
+      const cached = _transformCache.get(relativePath);
+      if (cached && cached.hash === contentHash) {
+        return cached.result;
+      }
+
+      // v12.6 Fix: Virtualization for ALL files. 
+      // This enables editing split-logic in .ts files via the Ghost Proxy.
       try {
         if (!sidecarPipe) {
           const hash = workspaceHash(projectRoot);
@@ -229,21 +245,21 @@ export function zenithGhostId(options: ZenithPluginOptions = {}): Plugin {
         let baseCode = code;
         const virtualContent = await fetchFromGhostProxy(relativePath, sidecarPipe);
         if (virtualContent) {
-           // v5.1: Critical Fix - Virtual content MUST still be injected with IDs
-           // before being served to Vite, otherwise selection tracking is lost.
            baseCode = virtualContent;
+           
+           // If it's NOT a JSX file, we can return the virtual content immediately
+           // as there's no Ghost-ID injection needed.
+           if (!JSX_EXTENSIONS.test(id)) {
+             return { code: baseCode, map: null };
+           }
+        } else if (!JSX_EXTENSIONS.test(id)) {
+           // Standard .ts/.js file with no virtual override — let Vite handle normally
+           return null;
         }
 
-        // [O2] Audit Fix: Skip re-injection if file content hasn't changed since last transform
-        const contentHash = fnv1a32(baseCode);
-        const cached = _transformCache.get(id);
-        if (cached && cached.hash === contentHash && !virtualContent) {
-          return { code: cached.result.code, map: null };
-        }
-
-        // 2. Local Injector (Pass either real disk code or virtual code)
+        // 2. Local Injector (JSX-only path)
         const result = injectGhostIds(baseCode, relativePath, attrName);
-        _transformCache.set(id, { hash: contentHash, result });
+        _transformCache.set(relativePath, { hash: contentHash, result });
         
         // 3. Sync to Sidecar Registry (Real-time)
         if (rpcWs && rpcWs.readyState === WebSocket.OPEN) {

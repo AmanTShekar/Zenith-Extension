@@ -361,18 +361,33 @@ impl ZenithApiServer for ZenithRpc {
         }
 
         vfs.ghost_registry.register_entries(entries);
+        
+        // v12.6: Persistence Hardening
+        let zenith_dir = self.state.project_root.join(".zenith");
+        vfs.save_registry(&zenith_dir, Some(self.state.ghost_index_path.clone())).ok();
+        
         Ok(true)
     }
 
     async fn unregister_ghosts(&self, ids: Vec<ZenithId>) -> RpcResult<bool> {
         let mut vfs = self.state.vfs.write().await;
         vfs.ghost_registry.remove_entries(&ids);
+        
+        // v12.6: Persistence Hardening
+        let zenith_dir = self.state.project_root.join(".zenith");
+        vfs.save_registry(&zenith_dir, Some(self.state.ghost_index_path.clone())).ok();
+        
         Ok(true)
     }
 
     async fn clear_file(&self, file_path: String) -> RpcResult<bool> {
         let mut vfs = self.state.vfs.write().await;
         vfs.ghost_registry.clear_for_file(&file_path);
+        
+        // v12.6: Persistence Hardening
+        let zenith_dir = self.state.project_root.join(".zenith");
+        vfs.save_registry(&zenith_dir, Some(self.state.ghost_index_path.clone())).ok();
+        
         Ok(true)
     }
 
@@ -421,7 +436,8 @@ impl ZenithApiServer for ZenithRpc {
 pub async fn start_rpc_server(
     port: u16,
     state: Arc<SharedState>,
-    hmr_tx: tokio::sync::broadcast::Sender<String>
+    hmr_tx: tokio::sync::broadcast::Sender<String>,
+    css_tx: tokio::sync::broadcast::Sender<crate::types::CssOverride>,
 ) -> anyhow::Result<()> {
     let addr = format!("127.0.0.1:{}", port);
     let server = ServerBuilder::default().build(addr.clone()).await?;
@@ -430,8 +446,6 @@ pub async fn start_rpc_server(
     let mut module = rpc_state.into_rpc();
 
     // v3.10 Infrastructure Hardening: Direct HMR Broadcast channel
-    // We register a manual subscription that broadcasts the "reload" signal
-    // directly to all connected clients (IDE and Vite plugin).
     module.register_subscription(
         "zenith.hmr.subscribe", 
         "zenith.hmr.update", 
@@ -452,7 +466,31 @@ pub async fn start_rpc_server(
         }
     )?;
 
-    info!("ZENITH_RPC: Server listening on ws://{} (HMR Active)", addr);
+    // v12.7 CSS Hardening: Real-time CSS broadcast
+    // This allows the browser to receive SAB scrub updates directly via WebSocket.
+    module.register_subscription(
+        "zenith.css.subscribe",
+        "zenith.css.patch",
+        "zenith.css.unsubscribe",
+        move |_: Params, pending_sink: jsonrpsee::server::PendingSubscriptionSink, _ctx, _ext| {
+            let mut rx = css_tx.subscribe();
+            async move {
+                if let Ok(sink) = pending_sink.accept().await {
+                    while let Ok(ovr) = rx.recv().await {
+                        if let Ok(msg) = serde_json::to_string(&ovr) {
+                             if let Ok(sub_msg) = jsonrpsee::SubscriptionMessage::from_json(&msg) {
+                                if sink.send(sub_msg).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )?;
+
+    info!("ZENITH_RPC: Server listening on ws://{} (HMR + CSS Active)", addr);
     let handle = server.start(module);
     handle.stopped().await;
     Ok(())

@@ -89,6 +89,12 @@ async fn handle_proxy(
         .header("host", format!("127.0.0.1:{}", target_port));
 
     for (key, value) in headers.iter() {
+        let key_str = key.as_str().to_lowercase();
+        // v13.0 Cache-Busting: We strip conditional headers to force a 200 OK response
+        // for HTML files, ensuring the bridge is always injected.
+        if key_str == "if-none-match" || key_str == "if-modified-since" {
+            continue;
+        }
         if key != "host" {
             target_req = target_req.header(key, value);
         }
@@ -124,11 +130,14 @@ async fn handle_proxy(
     if !status.is_success() && status != StatusCode::NOT_MODIFIED {
         warn!("[ZENITH-PROXY] Upstream returned non-success: {} for {}", status, req.uri());
     }
+    // v13.1 Strict Detection: Only inject into legitimate HTML. 
+    // Skip .js.map files or other assets that might carry incorrect mime types from HMR.
+    let path = req.uri().path().to_lowercase();
     let is_html = res.headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.contains("text/html"))
-        .unwrap_or(false);
+        .unwrap_or(false) && !path.ends_with(".map") && !path.ends_with(".js");
 
     let mut resp_builder = Response::builder().status(status.as_u16());
 
@@ -143,6 +152,7 @@ async fn handle_proxy(
         if key_str == "content-security-policy" || 
            key_str == "x-frame-options" || 
            key_str == "cross-origin-opener-policy" ||
+           key_str == "cross-origin-embedder-policy" ||
            key_str == "access-control-allow-origin" ||
            key_str == "content-length" ||
            key_str == "transfer-encoding"
@@ -155,6 +165,8 @@ async fn handle_proxy(
 
     // Force Open CORS for Zenith Bridge
     resp_builder = resp_builder.header("Access-Control-Allow-Origin", "*");
+    // v13.0 Cache-Busting: Ensure the browser doesn't cache the injected result itself
+    resp_builder = resp_builder.header("Cache-Control", "no-cache, no-store, must-revalidate");
     
     // [W4] Audit Fix: Re-strip Content-Length just in case it was re-added by builder defaults
     // Note: hyper_util / hyper 1.0 builders can sometimes be helpful in unwanted ways.
@@ -162,7 +174,7 @@ async fn handle_proxy(
     let mut response = resp_builder.body(Full::new(Bytes::new())).unwrap();
     response.headers_mut().remove(hyper::header::CONTENT_LENGTH);
     response.headers_mut().remove(hyper::header::TRANSFER_ENCODING);
-    let (mut parts, _) = response.into_parts();
+    let (parts, _) = response.into_parts();
     
     // v12.0 Hardening: We collect the full body here (draining the response)
     let body_bytes = match res.bytes().await {

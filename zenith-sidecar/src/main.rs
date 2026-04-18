@@ -204,7 +204,7 @@ async fn main() {
     let rpc_history = DashMap::new();
 
     let mut ghost_registry = GhostRegistry::new();
-    if let Err(e) = ghost_registry.load_from_root(&workspace_root, Some(ghost_index_path)) {
+    if let Err(e) = ghost_registry.load_from_root(&workspace_root, Some(ghost_index_path.clone())) {
         warn!("Failed to load ghost manifest: {e}");
     }
     info!("[SIDECAR] Phase 2/6: Registry initialized");
@@ -250,7 +250,25 @@ async fn main() {
         rpc_history,
         hmr_tx,
         project_root: workspace_root.clone(),
+        ghost_index_path: ghost_index_path.clone(),
         active_sandboxes: Arc::new(DashMap::new()),
+    });
+
+    // Trigger Initial Project Crawl (v12.6): Resolves cold-start VFS and split-file blindness.
+    let state_for_scan = state.clone();
+    let root_for_scan = project_root.clone();
+    let zenith_dir_for_scan = zenith_dir.clone();
+    tokio::spawn(async move {
+        // We wait a tiny bit to let the RPC server start up first, avoiding lock contention
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut vfs = state_for_scan.vfs.write().await;
+        if let Err(e) = vfs.scan_project(&root_for_scan) {
+            tracing::error!("[VFS] Background project crawl failed: {}", e);
+        } else {
+            // v12.6: Persist results of initial discovery
+            vfs.save_registry(&zenith_dir_for_scan, Some(state_for_scan.ghost_index_path.clone())).ok();
+            info!("[VFS] Background project crawl complete — Ghost index synchronized");
+        }
     });
 
 
@@ -363,17 +381,18 @@ async fn main() {
     // CSS override forwarder (receives from hot path, sends to WebSocket clients)
     // -----------------------------------------------------------------------
 
+    // v12.7 CSS Hardening: Broadcast channel for real-time CSS overrides
+    let (css_broadcast_tx, _css_broadcast_rx) = tokio::sync::broadcast::channel::<crate::types::CssOverride>(1024);
+
     // CSS override forwarder (receives from hot path, sends to WebSocket clients)
-    // L3 Fix: Actually log and prepare for forwarding to WebSocket — the JSON-RPC
-    // broadcast mechanism will be wired here when the push-notification API is added.
-    let _state_for_css = state.clone();
+    let css_broadcast_tx_clone = css_broadcast_tx.clone();
     tokio::spawn(async move {
         while let Some(ovr) = css_rx.recv().await {
             // Forward the CSS override to any connected WebSocket subscriber.
-            // For the v3.10 release this is prepared but the WS push channel
-            // is driven by the sidecar_status / HMR pathway instead.
+            let _ = css_broadcast_tx_clone.send(ovr.clone());
+            
             tracing::debug!(
-                "[CSS Override] {} = {} on {} (queued for WS push)",
+                "[CSS Override] {} = {} on {} (forwarded to broadcast)",
                 ovr.property, ovr.value, ovr.zenith_id
             );
         }
@@ -438,8 +457,10 @@ async fn main() {
     let state_for_rpc = state.clone();
     let port = args.port;
     let hmr_tx_for_rpc = state.hmr_tx.clone();
+    let css_tx_for_rpc = css_broadcast_tx.clone();
+    
     tokio::spawn(async move {
-        if let Err(e) = start_rpc_server(port, state_for_rpc, hmr_tx_for_rpc).await {
+        if let Err(e) = start_rpc_server(port, state_for_rpc, hmr_tx_for_rpc, css_tx_for_rpc).await {
             error!("[SIDECAR] JSON-RPC server error: {e}");
         }
     });

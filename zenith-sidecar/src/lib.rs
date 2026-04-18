@@ -56,6 +56,8 @@ pub struct SharedState {
     pub id_reverse_map: Arc<DashMap<ZenithIdHash, SmallVec<[ZenithId; 1]>>>,
     pub hmr_tx: tokio::sync::broadcast::Sender<String>,
     pub project_root: PathBuf,
+    /// Path to the MessagePack ghost index (v12.6 Cold Start)
+    pub ghost_index_path: PathBuf,
     /// Change #12: Sandbox Lifecycle Management
     pub active_sandboxes: Arc<DashMap<u16, tokio::task::JoinHandle<()>>>,
 }
