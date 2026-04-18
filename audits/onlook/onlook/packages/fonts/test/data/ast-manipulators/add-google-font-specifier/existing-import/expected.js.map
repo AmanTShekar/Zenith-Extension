@@ -1,1 +1,0 @@
-{"version":3,"file":"expected.js","sourceRoot":"","sources":["expected.tsx"],"names":[],"mappings":";;;AAAA,6CAAiD;AACpC,QAAA,KAAK,GAAG,IAAA,cAAK,EAAC;IACzB,OAAO,EAAE,CAAC,OAAO,CAAC;IAClB,MAAM,EAAE,CAAC,KAAK,EAAE,KAAK,CAAC;IACtB,KAAK,EAAE,CAAC,QAAQ,CAAC;IACjB,QAAQ,EAAE,cAAc;IACxB,OAAO,EAAE,MAAM;CAChB,CAAC,CAAC"}

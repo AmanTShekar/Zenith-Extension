@@ -50,10 +50,12 @@ final_trace*.log
 zenith-sidecar/src/vfs/worker.rs
 zenith-vite-plugin/test.*
 fresh_target/
-target/
-dist/
-out/
-build/
-build_sandbox/
 
-
+# Purged Content (Keep Local Only)
+audits/
+ZENITH_FULL_PROJECT_HISTORY.md
+ZENITH_V2_ARCHITECTURE_DEBATE.md
+check_output.txt
+test_harness.html
+_archive/
+*.map
