@@ -1,0 +1,1 @@
+{"version":3,"file":"screenshot.js","sourceRoot":"","sources":["screenshot.ts"],"names":[],"mappings":";;AAAA,8CAGC;AAHD,SAAgB,iBAAiB,CAAC,SAAiB,EAAE,QAAgB;IACjE,MAAM,SAAS,GAAG,QAAQ,CAAC,KAAK,CAAC,GAAG,CAAC,CAAC,CAAC,CAAC,CAAC;IACzC,OAAO,UAAU,SAAS,IAAI,IAAI,CAAC,GAAG,EAAE,IAAI,SAAS,EAAE,CAAC;AAC5D,CAAC"}

@@ -49,12 +49,11 @@ final_trace*.log
 # Project Specific
 zenith-sidecar/src/vfs/worker.rs
 zenith-vite-plugin/test.*
-audits/onlook/onlook/
-audits/onlook/desktop/
 fresh_target/
 target/
 dist/
 out/
 build/
 build_sandbox/
+
 
