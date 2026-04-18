@@ -1,16 +1,43 @@
+# Dependencies
 node_modules/
+
+# Build & Output
 dist/
 out/
 target/
-*.log
+build/
 *.bin
-*.wal
 *.msgpack
-.zenith/
+build_sandbox/
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Global IDE & Temp
 .vscode/
-*.mjs
+scratch/
+.idea/
+*.swp
+*.code-workspace
+
+# Scripts
+*.ps1
+*.sh
+*.bat
+
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+
+# Runtime & Logs
+*.log
+*.wal
 *.pid
 crash.dmp
+.zenith/
 build_error*.txt
 build_errors*.txt
 rust_error.log
@@ -18,8 +45,16 @@ cargo_err.log
 sidecar_*.log
 final_trace*.log
 *.timestamp-*.mjs
-zenith-demo/vanguard_report.json
-zenith-demo/vanguard_audit.js
+
+# Project Specific
 zenith-sidecar/src/vfs/worker.rs
 zenith-vite-plugin/test.*
-zenith-extension/_onlook_audit/
+audits/onlook/onlook/
+audits/onlook/desktop/
+fresh_target/
+target/
+dist/
+out/
+build/
+build_sandbox/
+

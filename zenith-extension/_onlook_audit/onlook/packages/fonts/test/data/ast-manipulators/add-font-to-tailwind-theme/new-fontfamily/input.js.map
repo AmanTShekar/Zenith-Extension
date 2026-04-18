@@ -1,1 +1,0 @@
-{"version":3,"file":"input.js","sourceRoot":"","sources":["input.tsx"],"names":[],"mappings":";;AAEA,MAAM,MAAM,GAAW;IACnB,OAAO,EAAE;QACL,kCAAkC;QAClC,uCAAuC;QACvC,gCAAgC;KACnC;IACD,KAAK,EAAE;QACH,MAAM,EAAE;YACJ,MAAM,EAAE;gBACJ,OAAO,EAAE,SAAS;aACrB;SACJ;KACJ;IACD,OAAO,EAAE,EAAE;CACd,CAAC;AAEF,kBAAe,MAAM,CAAC"}
