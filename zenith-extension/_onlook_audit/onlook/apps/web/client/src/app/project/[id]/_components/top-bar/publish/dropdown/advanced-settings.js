@@ -1,0 +1,24 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AdvancedSettingsSection = void 0;
+const editor_1 = require("@/components/store/editor");
+const state_1 = require("@/components/store/state");
+const models_1 = require("@onlook/models");
+const button_1 = require("@onlook/ui/button");
+const icons_1 = require("@onlook/ui/icons");
+const AdvancedSettingsSection = () => {
+    const stateManager = (0, state_1.useStateManager)();
+    const editorEngine = (0, editor_1.useEditorEngine)();
+    const openAdvancedSettings = () => {
+        editorEngine.state.publishOpen = false;
+        stateManager.settingsTab = models_1.SettingsTabValue.DOMAIN;
+        stateManager.isSettingsModalOpen = true;
+    };
+    return (<button_1.Button variant="ghost" className="flex flex-row items-center gap-2 py-4 rounded-t-none h-12" onClick={openAdvancedSettings}>
+            <icons_1.Icons.Gear className="h-4 w-4"/>
+            Advanced Settings
+            <icons_1.Icons.ChevronRight className="ml-auto h-3 w-3"/>
+        </button_1.Button>);
+};
+exports.AdvancedSettingsSection = AdvancedSettingsSection;
+//# sourceMappingURL=advanced-settings.js.map
