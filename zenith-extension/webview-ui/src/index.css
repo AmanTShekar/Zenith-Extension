@@ -89,6 +89,33 @@
     background-size: 40px 40px;
     pointer-events: none;
   }
+
+  /* DND Indicators */
+  .zenith-drop-target {
+    border: 1.5px solid var(--color-accent) !important;
+    background: rgba(0, 240, 255, 0.05) !important;
+    pointer-events: none;
+    z-index: 50;
+    border-radius: 4px;
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+  }
+
+  .zenith-drop-target-invalid {
+    border: 1.5px solid #FF4444 !important;
+    background: rgba(255, 68, 68, 0.05) !important;
+    pointer-events: none;
+    z-index: 50;
+    border-radius: 4px;
+    box-shadow: 0 0 15px rgba(255, 68, 68, 0.1);
+  }
+
+  .zenith-insertion-line {
+    background: var(--color-accent) !important;
+    box-shadow: 0 0 8px var(--color-accent);
+    pointer-events: none;
+    z-index: 100;
+    border-radius: 2px;
+  }
 }
 
 /* Custom Scrollbar — Senior Dev Grade */

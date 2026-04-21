@@ -1,54 +1,16 @@
 import { create } from 'zustand';
 import { vscode } from '../bridge';
 import { normalizeStyles } from './utils';
-import { createGhostSlice, GhostSlice } from './ghostSlice';
-import { createSelectionSlice, SelectionSlice } from './selectionSlice';
+import { createGhostSlice } from './ghostSlice';
+import type { GhostSlice } from './ghostSlice';
+import { createSelectionSlice } from './selectionSlice';
+import type { SelectionSlice } from './selectionSlice';
+import { createDndSlice } from './dndSlice';
+import type { DndSlice } from './dndSlice';
 
-const throttle = (fn: Function, wait: number) => {
-  let timeout: any = null;
-  let lastArgs: any[] = [];
-  return (...args: any[]) => {
-    lastArgs = args;
-    if (!timeout) {
-      timeout = setTimeout(() => {
-        fn(...lastArgs);
-        timeout = null;
-      }, wait);
-    }
-  };
-};
+import type { SelectionSignature, FiberInfo, HierarchyItem, InteractionState } from './types';
 
-const throttledPatchStyles = throttle((msg: any) => {
-  vscode.postMessage(msg);
-}, 16);
-
-const throttledBatchPatch = throttle((msg: any) => {
-  vscode.postMessage(msg);
-}, 16);
-
-export interface SelectionSignature {
-  tag: string;
-  classes: string[];
-  textContent: string;
-  xpath: string;
-}
-
-export interface FiberInfo {
-  name: string;
-  source?: { fileName: string; lineNumber: number; columnNumber: number };
-  owner?: { name: string; source: FiberInfo['source'] };
-}
-
-export interface HierarchyItem {
-  id: string;
-  tagName: string;
-  className: string;
-  componentName?: string;
-}
-
-export type InteractionState = 'base' | 'hover' | 'focus' | 'active' | 'disabled';
-
-interface SelectionState extends SelectionSlice, GhostSlice {
+interface SelectionState extends SelectionSlice, GhostSlice, DndSlice {
   stateStyles: Record<InteractionState, Record<string, string>>;
   measurementData: { 
     top?: number; left?: number; right?: number; bottom?: number;
@@ -65,7 +27,7 @@ interface SelectionState extends SelectionSlice, GhostSlice {
   }>;
   historyIndex: number;
   
-  actions: SelectionSlice['selectionActions'] & GhostSlice['ghostActions'] & {
+  actions: SelectionSlice['selectionActions'] & GhostSlice['ghostActions'] & DndSlice['dndActions'] & {
     toggleLiveSave: () => void;
     setStagedCount: (count: number) => void;
     patchStyle: (property: string, value: string) => void;
@@ -75,6 +37,8 @@ interface SelectionState extends SelectionSlice, GhostSlice {
     deleteNode: (id: string) => void;
     duplicateNode: (id: string) => void;
     moveNode: (id: string, parentId: string, oldOrder: string[], newOrder: string[]) => void;
+    reparentNodes: (identifier: string, newParentId: string, index: number) => void;
+    updateText: (id: string, text: string) => void;
     groupNodes: (ids: string[], containerTag: string) => void;
     commitAll: () => void;
     clearCommits: () => void;
@@ -91,10 +55,12 @@ const MAX_HISTORY_LENGTH = 50;
 export const useSelectionStore = create<SelectionState>((set, get, ...args) => {
   const selectionSlice = createSelectionSlice(set, get, ...args);
   const ghostSlice = createGhostSlice(set, get, ...args);
+  const dndSlice = createDndSlice(set, get, ...args);
 
   return {
     ...selectionSlice,
     ...ghostSlice,
+    ...dndSlice,
     stateStyles: { base: {}, hover: {}, focus: {}, active: {}, disabled: {} },
     measurementData: null,
     auditIssues: [],
@@ -106,6 +72,7 @@ export const useSelectionStore = create<SelectionState>((set, get, ...args) => {
     actions: {
       ...selectionSlice.selectionActions,
       ...ghostSlice.ghostActions,
+      ...dndSlice.dndActions,
 
       setSelected: (selectedId, elementInfo, rect, computedStyles, currentStack, fiberInfo) => {
         selectionSlice.selectionActions.setSelected(selectedId, elementInfo, rect, computedStyles, currentStack, fiberInfo);
@@ -147,7 +114,7 @@ export const useSelectionStore = create<SelectionState>((set, get, ...args) => {
           stagedCount: state.stagedCount + 1 
         });
 
-        throttledPatchStyles({
+        vscode.patchStyleThrottled({
           type: 'patchStyle',
           zenithId: state.selectedId,
           signature: state.elementSignature,
@@ -202,7 +169,7 @@ export const useSelectionStore = create<SelectionState>((set, get, ...args) => {
           stagedCount: state.stagedCount + Object.keys(styles).length 
         });
 
-        throttledBatchPatch({
+        vscode.patchBatchThrottled({
           type: 'zenithBatchPatch',
           zenithId: state.selectedId,
           signature: state.elementSignature,
@@ -222,6 +189,26 @@ export const useSelectionStore = create<SelectionState>((set, get, ...args) => {
 
       moveNode: (id, parentId, oldOrder, newOrder) => {
         vscode.postMessage({ type: 'moveNode', id, parentId, oldOrder, newOrder });
+      },
+
+      reparentNodes: (identifier, newParentId, index) => {
+        vscode.postMessage({
+          type: 'structuralOperation',
+          operation: {
+            zenithId: identifier,
+            reparent: { newParentId, index }
+          }
+        });
+      },
+
+      updateText: (id, text) => {
+        vscode.postMessage({
+          type: 'structuralOperation',
+          operation: {
+            zenithId: id,
+            contentUpdate: { text }
+          }
+        });
       },
 
       groupNodes: (ids, containerTag) => {

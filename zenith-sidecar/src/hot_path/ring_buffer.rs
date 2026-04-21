@@ -134,11 +134,10 @@ impl RingBufferConsumer {
         // We poll until the handshake is valid, but we don't abort the thread.
         // This allows the sidecar to start before the webview and recover 
         // once the user opens the canvas.
-        let mut magic = 0u32;
         let mut logged_wait = false;
 
         loop {
-            magic = self.read_u32(0);
+            let magic = self.read_u32(0);
             if magic == MAGIC_ZNTH {
                 if logged_wait {
                     info!("[SIDECAR] SAB Handshake SUCCESS — Hot path active");

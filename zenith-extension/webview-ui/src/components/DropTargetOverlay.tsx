@@ -3,22 +3,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useSelectionStore } from '../stores/useSelectionStore';
 
 export const DropTargetOverlay: React.FC = () => {
-  const dragTargetId = useSelectionStore(state => state.dragTargetId);
-  const dragTargetRect = useSelectionStore(state => state.dragTargetRect);
+  const dropTargetId = useSelectionStore(state => state.dropTargetId);
+  const dropTargetRect = useSelectionStore(state => state.dropTargetRect);
   const isDragging = useSelectionStore(state => state.isDragging);
 
   return (
     <AnimatePresence>
-      {isDragging && dragTargetId && dragTargetRect && (
+      {isDragging && dropTargetId && dropTargetRect && (
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ 
             opacity: 1, 
             scale: 1,
-            x: dragTargetRect.x,
-            y: dragTargetRect.y,
-            width: dragTargetRect.width,
-            height: dragTargetRect.height
+            x: dropTargetRect.x,
+            y: dropTargetRect.y,
+            width: dropTargetRect.width,
+            height: dropTargetRect.height
           }}
           exit={{ opacity: 0, scale: 0.98 }}
           transition={{ duration: 0.15, ease: "easeOut" }}

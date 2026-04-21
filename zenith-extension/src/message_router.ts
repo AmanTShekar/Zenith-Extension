@@ -36,12 +36,23 @@ export async function handleWebviewMessage(
             });
             return;
 
+        case 'patchStyle':
         case 'stage':
             try {
-                if (!message.intent) throw new Error('Missing intent');
+                let intent = message.intent;
+                if (!intent && command === 'patchStyle') {
+                    intent = {
+                        type: 'PropertyChange',
+                        element: message.zenithId,
+                        property: message.property,
+                        value: message.value,
+                        timestamp: Date.now()
+                    };
+                }
+                if (!intent) throw new Error('Missing intent');
                 
                 // v3.8 Hot Path: Direct-to-SAB for numeric scrubs
-                const val = parseFloat(message.intent.value);
+                const val = parseFloat(intent.value);
                 if (handle && handle.hotPathProducer && !isNaN(val)) {
                     // Map property string to ID (Must match Sidecar's registry)
                     // For now, we use a simple mapping or just pass the string if the producer supports it.
@@ -51,9 +62,9 @@ export async function handleWebviewMessage(
                         'left': 1, 'top': 2, 'width': 3, 'height': 4, 
                         'opacity': 5, 'transform': 6 
                     };
-                    const pid = propMap[message.intent.property];
+                    const pid = propMap[intent.property];
                     if (pid) {
-                        handle.hotPathProducer.writeScrub(message.intent.element, pid, val, ScrubMsgType.Scrub);
+                        handle.hotPathProducer.writeScrub(intent.element, pid, val, ScrubMsgType.Scrub);
                     }
                 }
 
@@ -61,12 +72,12 @@ export async function handleWebviewMessage(
                     type: 'zenithForwardToFrame',
                     payload: {
                         type: 'zenithPatchStyle',
-                        id: message.intent.element || `gen-${Math.random().toString(36).slice(2, 9)}`,
-                        property: message.intent.property,
-                        value: message.intent.value
+                        id: intent.element || `gen-${Math.random().toString(36).slice(2, 9)}`,
+                        property: intent.property,
+                        value: intent.value
                     }
                 });
-                await vscode.commands.executeCommand('zenith.engine.stage', message.intent);
+                await vscode.commands.executeCommand('zenith.engine.stage', intent);
                 if (handle) {
                    webview.postMessage({ type: 'status', connected: true, stagedCount: handle.stagedCount });
                 }
@@ -76,6 +87,7 @@ export async function handleWebviewMessage(
             }
             return;
 
+        case 'zenithBatchPatch':
         case 'stageBatch':
             try {
                 if (!message.zenithId || !message.styles) throw new Error('Missing batch params');
@@ -186,17 +198,24 @@ export async function handleWebviewMessage(
         case 'structuralOperation':
             try {
                 if (!handle) throw new Error('Not connected');
+                const op = message.operation;
+                
+                // v14.0 Forensic: High-integrity logging before committing to Sidecar
+                ipcChannel.appendLine(`[STRUCTURAL-ENGINE] Queueing mutation: ${op.zenithId} -> operation: ${Object.keys(op).join(',')}`);
+                
                 await vscode.commands.executeCommand('zenith.engine.stage', {
                     type: 'StructuralChange',
-                    operation: message.operation,
-                    element: message.zenithId,
-                    payload: message.payload
+                    ...op
                 });
+                
                 const count = await syncSidecarStatus(root);
                 updateStatusBar(root);
                 webview.postMessage({ type: 'status', connected: true, stagedCount: count });
+                webview.postMessage({ type: 'structuralResult', success: true });
             } catch (e: any) {
+                ipcChannel.appendLine(`[STRUCTURAL-ENGINE] FAILED: ${e.message}`);
                 webview.postMessage({ type: 'log', text: `Structural error: ${e.message}`, level: 'error' });
+                webview.postMessage({ type: 'structuralResult', success: false, error: e.message });
             }
             return;
 

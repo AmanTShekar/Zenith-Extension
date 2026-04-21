@@ -1,5 +1,5 @@
-import { StateCreator } from 'zustand';
-import { FiberInfo, HierarchyItem, InteractionState } from './useSelectionStore';
+import type { StateCreator } from 'zustand';
+import type { FiberInfo, HierarchyItem, InteractionState } from './types';
 import { normalizeStyles } from './utils';
 
 export interface SelectionSlice {
@@ -22,7 +22,9 @@ export interface SelectionSlice {
     ) => void;
     setRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
     setActiveState: (state: InteractionState) => void;
+    setEditingText: (editing: boolean) => void;
   };
+  isEditingText: boolean;
 }
 
 export const createSelectionSlice: StateCreator<SelectionSlice> = (set) => ({
@@ -49,5 +51,7 @@ export const createSelectionSlice: StateCreator<SelectionSlice> = (set) => ({
     },
     setRect: (rect) => set({ rect }),
     setActiveState: (activeState) => set({ activeState }),
-  }
+    setEditingText: (isEditingText) => set({ isEditingText }),
+  },
+  isEditingText: false,
 });

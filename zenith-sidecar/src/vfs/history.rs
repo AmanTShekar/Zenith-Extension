@@ -12,6 +12,7 @@ pub struct UndoFrame {
     pub reverse_patches: Vec<FilePatch>,
 }
 
+#[derive(Clone)]
 pub struct HistoryManager {
     pub undo_stack: VecDeque<UndoFrame>,
     pub redo_stack: Vec<UndoFrame>,

@@ -14,7 +14,7 @@ export type ZenithIpcMessage =
   | { type: 'zenithOpenSource'; zenithId: string; filePath?: string; line?: number }
   | { type: 'zenithTextEdit'; zenithId: string; content: string }
   | { type: 'stage'; intent: ZenithIntent; zenithStack?: any[] }
-  | { type: 'structuralOperation'; operation: string; zenithId: string; payload?: any }
+  | { type: 'structuralOperation'; operation: any }
   | { type: 'toggleVisibility'; zenithId: string }
   | { type: 'toggleLock'; zenithId: string }
   | { type: 'hardenWal' }
@@ -32,6 +32,28 @@ export interface ZenithIntent {
 
 declare const acquireVsCodeApi: () => VSCodeApi;
 
+const throttle = (func: Function, limit: number) => {
+  let inThrottle: boolean;
+  let lastArgs: any[] | null = null;
+  
+  return function(this: any, ...args: any[]) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => {
+        inThrottle = false;
+        if (lastArgs) {
+          const finalArgs = lastArgs;
+          lastArgs = null;
+          func.apply(this, finalArgs);
+        }
+      }, limit);
+    } else {
+      lastArgs = args;
+    }
+  };
+};
+
 class VSCodeBridge {
   private vscode: VSCodeApi | null = typeof (window as any).acquireVsCodeApi === 'function' ? acquireVsCodeApi() : null;
 
@@ -42,6 +64,15 @@ class VSCodeBridge {
       console.warn('VSCode API not available', msg);
     }
   }
+
+  // Throttled versions for high-frequency updates
+  patchStyleThrottled = throttle((data: any) => {
+    this.postMessage(data);
+  }, 50);
+
+  patchBatchThrottled = throttle((data: any) => {
+    this.postMessage(data);
+  }, 50);
 
   // Helper for staging properties
   stage(element: string, property: string, value: string, stack: any[] = []) {

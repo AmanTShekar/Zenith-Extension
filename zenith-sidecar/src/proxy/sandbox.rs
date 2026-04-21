@@ -10,7 +10,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper::server::conn::http1;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
-use http_body_util::{BodyExt, Full};
+use http_body_util::Full;
 use bytes::Bytes;
 use tracing::{info, error, warn};
 

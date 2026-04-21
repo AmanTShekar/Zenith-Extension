@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSelectionStore } from '../stores/useSelectionStore';
 import { getSnapping } from '../utils/snapUtils';
+import { useStructuralDND } from './useStructuralDND';
 import type { Rect } from '../utils/snapUtils';
 
 export interface DragState {
@@ -12,30 +13,31 @@ export interface DragState {
 }
 
 const DEADZONE_THRESHOLD = 3;
-// Ghost sync to iframe: 100ms — pure CSS var write, no React, no layout
-const GHOST_SYNC_THROTTLE_MS = 100;
+const GHOST_SYNC_THROTTLE_MS = 16; 
+const DOUBLE_CLICK_THRESHOLD = 300;
 
 export function useArtboardInteraction(
   iframeRef: React.RefObject<HTMLIFrameElement | null>,
   zoom: number
 ) {
+  const { patchBatch, setRect, setDragging } = useSelectionStore(state => state.actions);
   const selectedId = useSelectionStore(state => state.selectedId);
   const selectedRect = useSelectionStore(state => state.rect);
-  // patchBatch fires to code exactly ONCE on pointer-up
-  const { patchBatch, setRect, setDragging } = useSelectionStore(state => state.actions);
+  const isEditingText = useSelectionStore(state => state.isEditingText);
+
+  const { handleDragMove, handleDragStart: startStructuralDrag, handleDragEnd } = useStructuralDND();
 
   const [interaction, setInteraction] = useState<DragState | null>(null);
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
 
-  const sceneBoundsRef = useRef<Array<{ id: string; rect: Rect }>>([]);
+  const sceneBoundsRef = useRef<Array<{id: string, rect: Rect}>>([]);
   const latestRectRef = useRef<Rect | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const lastGhostSyncRef = useRef<number>(0);
   const isActuallyMovingRef = useRef<boolean>(false);
+  const lastClickTimeRef = useRef<number>(0);
 
   // ─── CSS Variable Paint Bypass ───────────────────────────────────────────────
-  // The SelectionOverlay binds its transform to these vars in drag mode.
-  // Zero React renders, zero store mutations, zero IPC during drag frames.
   const setCssVars = (rect: Rect) => {
     const root = document.documentElement;
     root.style.setProperty('--zenith-drag-x', `${Math.round(rect.x)}`);
@@ -52,12 +54,9 @@ export function useArtboardInteraction(
     root.style.removeProperty('--zenith-drag-h');
   };
 
-  // ─── Ghost Isolation: hide real element inside iframe during drag ─────────────
-  // By making the element opacity:0 (via the existing preview-style channel),
-  // the CSS layout slot is preserved (no flow collapse!) but the element is invisible.
-  // The SelectionOverlay acts as the visible "ghost" during drag.
   const enterGhostMode = (id: string) => {
-    // Send direct postMessage to iframe to hide the real element while keeping its layout slot
+    console.log(`[ZENITH] GHOST_START | ID: ${id}`);
+    if (iframeRef.current) iframeRef.current.style.pointerEvents = 'none';
     iframeRef.current?.contentWindow?.postMessage({
       type: 'zenithPatchStyle',
       id,
@@ -67,7 +66,8 @@ export function useArtboardInteraction(
   };
 
   const exitGhostMode = (id: string) => {
-    // Restore visibility
+    console.log(`[ZENITH] GHOST_EXIT | ID: ${id}`);
+    if (iframeRef.current) iframeRef.current.style.pointerEvents = 'auto';
     iframeRef.current?.contentWindow?.postMessage({
       type: 'zenithPatchStyle',
       id,
@@ -76,10 +76,6 @@ export function useArtboardInteraction(
     }, '*');
   };
 
-  // ─── Throttled ghost position sync to iframe ─────────────────────────────────
-  // Once per 100ms, we sync the final position to the iframe via a lightweight
-  // postMessage. The iframe responds by updating CSS vars on the ghost element
-  // (handled by the Zenith bridge script). No React, no vdom involvement.
   const syncGhostPosition = (id: string, rect: Rect) => {
     const now = Date.now();
     if (now - lastGhostSyncRef.current < GHOST_SYNC_THROTTLE_MS) return;
@@ -94,25 +90,43 @@ export function useArtboardInteraction(
     }, '*');
   };
 
-  // ─── Drag Start ──────────────────────────────────────────────────────────────
   const handleDragStart = useCallback((e: React.PointerEvent) => {
+    if (!selectedRect || !selectedId || isEditingText) return;
+    
+    const now = Date.now();
+    const timeSinceLastClick = now - lastClickTimeRef.current;
+    lastClickTimeRef.current = now;
+
+    if (timeSinceLastClick < DOUBLE_CLICK_THRESHOLD) {
+      console.log(`[ZENITH] DOUBLE_CLICK -> EDIT_MODE | ID: ${selectedId}`);
+      iframeRef.current?.contentWindow?.postMessage({ type: 'zenithSetEditable', id: selectedId }, '*');
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
-    if (!selectedRect || !selectedId) return;
 
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch(err) { console.error('Capture fail', err); }
 
-    iframeRef.current?.contentWindow?.postMessage({ type: 'zenithRequestSceneBounds' }, '*');
-    sceneBoundsRef.current = (window as any).__ZENITH_SCENE_BOUNDS__ || [];
+    // Aggregate bounds: Scene elements + Viewport boundaries
+    const boundsArray = [...((window as any).__ZENITH_SCENE_BOUNDS__ || [])];
+    const iframeRect = iframeRef.current?.getBoundingClientRect();
+    if (iframeRect) {
+      boundsArray.push({
+        id: 'viewport',
+        rect: { x: 0, y: 0, width: iframeRect.width / zoom, height: iframeRect.height / zoom }
+      });
+    }
+    sceneBoundsRef.current = boundsArray;
+
     latestRectRef.current = { ...selectedRect };
     isActuallyMovingRef.current = false;
 
-    // Seed vars at current position
     setCssVars(selectedRect);
-
-    // Hide real element in iframe — its layout slot stays intact (no flow collapse)
     enterGhostMode(selectedId);
     setDragging(true);
+
+    startStructuralDrag(selectedId, e.clientX, e.clientY);
 
     setInteraction({
       type: 'drag',
@@ -120,21 +134,29 @@ export function useArtboardInteraction(
       startY: e.clientY,
       startRect: { ...selectedRect },
     });
-  }, [selectedRect, selectedId, iframeRef, setDragging]);
+    console.log(`[ZENITH] DRAG_START | ID: ${selectedId}`, selectedRect);
+  }, [selectedRect, selectedId, isEditingText, setDragging, startStructuralDrag, iframeRef, zoom]);
 
-  // ─── Resize Start ────────────────────────────────────────────────────────────
   const handleResizeStart = useCallback((handle: string, e: React.PointerEvent) => {
+    if (!selectedRect || !selectedId || isEditingText) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!selectedRect || !selectedId) return;
 
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch(err) { console.error('Capture fail', err); }
 
-    iframeRef.current?.contentWindow?.postMessage({ type: 'zenithRequestSceneBounds' }, '*');
-    sceneBoundsRef.current = (window as any).__ZENITH_SCENE_BOUNDS__ || [];
+    const boundsArray = [...((window as any).__ZENITH_SCENE_BOUNDS__ || [])];
+    const iframeRect = iframeRef.current?.getBoundingClientRect();
+    if (iframeRect) {
+      boundsArray.push({
+        id: 'viewport',
+        rect: { x: 0, y: 0, width: iframeRect.width / zoom, height: iframeRect.height / zoom }
+      });
+    }
+    sceneBoundsRef.current = boundsArray;
+
     latestRectRef.current = { ...selectedRect };
     isActuallyMovingRef.current = false;
-
+    
     setCssVars(selectedRect);
     enterGhostMode(selectedId);
     setDragging(true);
@@ -146,9 +168,9 @@ export function useArtboardInteraction(
       startY: e.clientY,
       startRect: { ...selectedRect },
     });
-  }, [selectedRect, selectedId, iframeRef, setDragging]);
+    console.log(`[ZENITH] RESIZE_START | ID: ${selectedId} | HANDLE: ${handle}`, selectedRect);
+  }, [selectedRect, selectedId, isEditingText, setDragging, iframeRef, zoom]);
 
-  // ─── Move Handler ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!interaction) {
       setGuides({ x: [], y: [] });
@@ -176,147 +198,156 @@ export function useArtboardInteraction(
         if (interaction.type === 'resize') {
           const { handle } = interaction;
           if (!handle) return;
-          const dx = rawDx;
-          const dy = rawDy;
+          
+          let dx = rawDx;
+          let dy = rawDy;
 
-          if (handle.includes('e')) {
-            newRect.width = Math.max(1, interaction.startRect.width + (isAltKey ? dx * 2 : dx));
-            if (isAltKey) newRect.x = interaction.startRect.x - dx;
-          } else if (handle.includes('w')) {
-            newRect.width = Math.max(1, interaction.startRect.width - (isAltKey ? dx * 2 : dx));
-            newRect.x = interaction.startRect.x + dx;
+          if (handle.includes('e')) newRect.width = Math.max(1, interaction.startRect.width + dx);
+          if (handle.includes('w')) {
+            newRect.width = Math.max(1, interaction.startRect.width - dx);
+            newRect.x = interaction.startRect.x + (interaction.startRect.width - newRect.width);
           }
-
-          if (handle.includes('s')) {
-            newRect.height = Math.max(1, interaction.startRect.height + (isAltKey ? dy * 2 : dy));
-            if (isAltKey) newRect.y = interaction.startRect.y - dy;
-          } else if (handle.includes('n')) {
-            newRect.height = Math.max(1, interaction.startRect.height - (isAltKey ? dy * 2 : dy));
-            newRect.y = interaction.startRect.y + dy;
+          if (handle.includes('s')) newRect.height = Math.max(1, interaction.startRect.height + dy);
+          if (handle.includes('n')) {
+            newRect.height = Math.max(1, interaction.startRect.height - dy);
+            newRect.y = interaction.startRect.y + (interaction.startRect.height - newRect.height);
           }
 
           if (isShiftKey) {
             const ratio = interaction.startRect.width / interaction.startRect.height;
-            newRect.height = newRect.width / ratio;
+            if (['e', 'w'].includes(handle)) {
+              newRect.height = newRect.width / ratio;
+            } else if (['n', 's'].includes(handle)) {
+              newRect.width = newRect.height * ratio;
+            } else {
+              const newRatio = newRect.width / newRect.height;
+              if (newRatio > ratio) newRect.width = newRect.height * ratio;
+              else newRect.height = newRect.width / ratio;
+            }
             if (handle.includes('n')) newRect.y = interaction.startRect.y + (interaction.startRect.height - newRect.height);
             if (handle.includes('w')) newRect.x = interaction.startRect.x + (interaction.startRect.width - newRect.width);
           }
 
-          const snap = getSnapping(newRect, sceneBoundsRef.current, selectedId ?? undefined);
-          if (handle.includes('e')) newRect.width += (snap.x + newRect.width) - (newRect.x + newRect.width);
-          if (handle.includes('s')) newRect.height += (snap.y + newRect.height) - (newRect.y + newRect.height);
+          if (isAltKey) {
+             const dw = newRect.width - interaction.startRect.width;
+             const dh = newRect.height - interaction.startRect.height;
+             newRect.width = interaction.startRect.width + dw * 2;
+             newRect.height = interaction.startRect.height + dh * 2;
+             newRect.x = interaction.startRect.x - dw;
+             newRect.y = interaction.startRect.y - dh;
+          }
+
+          const activeEdges: { x: number[], y: number[] } = { x: [], y: [] };
+          if (handle.includes('w')) activeEdges.x.push(0);
+          if (handle.includes('e')) activeEdges.x.push(2);
+          if (handle.includes('n')) activeEdges.y.push(0);
+          if (handle.includes('s')) activeEdges.y.push(2);
+
+          const snap = getSnapping(newRect, sceneBoundsRef.current, selectedId ?? undefined, activeEdges);
+          
+          if (handle.includes('e')) {
+            const snappedRight = snap.x + newRect.width;
+            newRect.width = Math.max(1, snappedRight - newRect.x);
+          } else if (handle.includes('w')) {
+            const oldRight = newRect.x + newRect.width;
+            newRect.x = snap.x;
+            newRect.width = Math.max(1, oldRight - newRect.x);
+          }
+          if (handle.includes('s')) {
+            const snappedBottom = snap.y + newRect.height;
+            newRect.height = Math.max(1, snappedBottom - newRect.y);
+          } else if (handle.includes('n')) {
+            const oldBottom = newRect.y + newRect.height;
+            newRect.y = snap.y;
+            newRect.height = Math.max(1, oldBottom - newRect.y);
+          }
+          setGuides(snap.guides);
         } else {
           newRect.x = interaction.startRect.x + rawDx;
           newRect.y = interaction.startRect.y + rawDy;
+          
+          const boundsMap = new Map<string, DOMRect>();
+          sceneBoundsRef.current.forEach(b => boundsMap.set(b.id, b.rect as any));
+          handleDragMove(e.clientX, e.clientY, boundsMap);
+          
           const snap = getSnapping(newRect, sceneBoundsRef.current, selectedId ?? undefined);
           newRect.x = snap.x;
           newRect.y = snap.y;
+          newRect.width = interaction.startRect.width;
+          newRect.height = interaction.startRect.height;
           setGuides(snap.guides);
         }
 
         latestRectRef.current = newRect;
-
-        // Only update CSS vars — overlay reads them via var() reference.
-        // Zero store mutations, zero IPC, zero React re-renders per frame.
         setCssVars(newRect);
-
-        // Throttled: sync ghost position to iframe at 100ms (pure CSS write, no React)
         if (selectedId) syncGhostPosition(selectedId, newRect);
       });
     };
 
     const onPointerUp = (e: PointerEvent) => {
-      try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* already released */ }
-
+      try { (e.target as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null; }
 
       const finalRect = latestRectRef.current;
+      const isActuallyMoving = isActuallyMovingRef.current;
 
-      if (finalRect && isActuallyMovingRef.current && selectedId) {
-        // Step 1: Sync store rect once
+      handleDragEnd(); 
+
+      if (finalRect && isActuallyMoving && selectedId) {
         setRect(finalRect);
-
-        // Fetch current styles from store
         const computedStyles = useSelectionStore.getState().computedStyles;
         const isAbsolute = computedStyles.position === 'absolute' || computedStyles.position === 'fixed';
-        const targetPosition = isAbsolute ? computedStyles.position : 'relative';
         
-        const initialLeft = parseFloat(computedStyles.left) || 0;
-        const initialTop = parseFloat(computedStyles.top) || 0;
-        const initialWidth = parseFloat(computedStyles.width) || interaction.startRect.width;
-        const initialHeight = parseFloat(computedStyles.height) || interaction.startRect.height;
+        // v12.1: Robust coordinate mapping
+        const getNum = (val: string) => {
+          if (!val || val === 'auto') return 0;
+          return parseFloat(val) || 0;
+        };
+
+        const initialLeft = getNum(computedStyles.left);
+        const initialTop = getNum(computedStyles.top);
+        const initialWidth = getNum(computedStyles.width) || interaction.startRect.width;
+        const initialHeight = getNum(computedStyles.height) || interaction.startRect.height;
         
         const dx = finalRect.x - interaction.startRect.x;
         const dy = finalRect.y - interaction.startRect.y;
         
-        const finalLeft = Math.round(initialLeft + dx);
-        const finalTop = Math.round(initialTop + dy);
+        const styles: Record<string, string> = {};
         
-        let dw = 0;
-        let dh = 0;
+        // Only apply top/left if they actually changed OR if they were already absolute
+        if (Math.abs(dx) > 0.01 || isAbsolute) {
+           styles.left = `${Math.round(initialLeft + dx)}px`;
+        }
+        if (Math.abs(dy) > 0.01 || isAbsolute) {
+           styles.top = `${Math.round(initialTop + dy)}px`;
+        }
+        
         if (interaction.type === 'resize') {
-           dw = finalRect.width - interaction.startRect.width;
-           dh = finalRect.height - interaction.startRect.height;
+           const dw = finalRect.width - interaction.startRect.width;
+           const dh = finalRect.height - interaction.startRect.height;
+           styles.width = `${Math.round(initialWidth + dw)}px`;
+           styles.height = `${Math.round(initialHeight + dh)}px`;
         }
 
-        // Step 1.5: Instantly patch layout into iframe to beat HMR and prevent RectSync snap-back
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'zenithPatchStyle',
-          id: selectedId,
-          property: 'position',
-          value: targetPosition
-        }, '*');
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'zenithPatchStyle',
-          id: selectedId,
-          property: 'left',
-          value: `${finalLeft}px`
-        }, '*');
-        iframeRef.current?.contentWindow?.postMessage({
-          type: 'zenithPatchStyle',
-          id: selectedId,
-          property: 'top',
-          value: `${finalTop}px`
-        }, '*');
-        if (interaction.type === 'resize') {
-          iframeRef.current?.contentWindow?.postMessage({
-            type: 'zenithPatchStyle',
-            id: selectedId,
-            property: 'width',
-            value: `${Math.round(initialWidth + dw)}px`
-          }, '*');
-          iframeRef.current?.contentWindow?.postMessage({
-            type: 'zenithPatchStyle',
-            id: selectedId,
-            property: 'height',
-            value: `${Math.round(initialHeight + dh)}px`
-          }, '*');
+        // v12.2: Force relative position if static and moved, to ensure top/left work
+        if (!isAbsolute && (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1)) {
+          if (computedStyles.position === 'static' || !computedStyles.position) {
+            styles.position = 'relative';
+          }
         }
+
+        console.log(`[ZENITH] COMMIT_STYLE | ID: ${selectedId} | TYPE: ${interaction.type}`, styles);
         
-        // Step 1.9: Restore element visibility AFTER moving it
         exitGhostMode(selectedId);
-
-        // Step 3: Write to code exactly ONCE — this is the only IPC call during the whole gesture
-        const batch: Record<string, string> = {
-          position: targetPosition,
-          top: `${finalTop}px`,
-          left: `${finalLeft}px`,
-        };
-        if (interaction.type === 'resize') {
-          batch.width = `${Math.round(initialWidth + dw)}px`;
-          batch.height = `${Math.round(initialHeight + dh)}px`;
-        }
-        
-        patchBatch(batch);
+        patchBatch(styles);
       } else if (selectedId) {
-        // No actual move: restore visibility without writing code
+        console.log(`[ZENITH] INTERACTION_CANCEL | ID: ${selectedId}`);
         exitGhostMode(selectedId);
       }
 
       setDragging(false);
       setInteraction(null);
       setGuides({ x: [], y: [] });
-      isActuallyMovingRef.current = false;
       clearCssVars();
     };
 
@@ -326,9 +357,8 @@ export function useArtboardInteraction(
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
-      clearCssVars();
     };
-  }, [interaction, zoom, selectedId, setRect, patchBatch, setDragging, iframeRef]);
+  }, [interaction, zoom, selectedId, setRect, patchBatch, setDragging, iframeRef, handleDragMove, handleDragEnd]);
 
   return { interaction, guides, handleResizeStart, handleDragStart };
 }

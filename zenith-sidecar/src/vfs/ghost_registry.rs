@@ -79,7 +79,7 @@ pub struct GhostEntry {
 }
 
 /// The Ghost Registry loads and watches the `.zenith/manifest.json`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GhostRegistry {
     /// Map of GhostId → GhostEntry
     entries: HashMap<ZenithId, GhostEntry>,

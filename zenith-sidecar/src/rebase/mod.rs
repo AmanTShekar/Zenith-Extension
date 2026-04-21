@@ -135,7 +135,6 @@ impl RebaseEngine {
 
         for m in re.find_iter(source) {
             let mut score = 1;
-            let match_text = m.as_str();
             
             // Context Scoring
             if let Some(prev) = &sig.prev_sibling_tag {

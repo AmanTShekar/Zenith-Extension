@@ -30,7 +30,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", content = "data")]
 pub enum StageResult {
-    Success { new_zenith_id: Option<ZenithId> },
+    Success { 
+        new_zenith_id: Option<ZenithId>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        invalidation_map: Option<HashMap<ZenithId, ZenithId>>,
+    },
     Conflict(TransformResult),
     Error(String),
 }
@@ -211,18 +215,31 @@ impl ZenithApiServer for ZenithRpc {
         }
         let tx = uuid::Uuid::parse_str(&tx_id).map_err(|e| internal_error(anyhow!(e)))?;
         let mut vfs = self.state.vfs.write().await;
+        
+        // v12.8 Hardening: Atomic Snapshot Rollback
+        vfs.create_snapshot();
+        
         let project_root = self.state.project_root.clone();
-        let (result, new_id) = vfs.stage_mutation(tx, intent, &project_root).map_err(internal_error)?;
-        let response = match result {
-            TransformResult::NoConflict => StageResult::Success { new_zenith_id: new_id },
-            TransformResult::HumanReview { .. } => StageResult::Conflict(result),
-            TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id },
+        let result = match vfs.stage_mutation(tx, intent, &project_root) {
+            Ok((result, new_id)) => {
+                vfs.commit_snapshot(); // Structural change succeeded
+                let response = match result {
+                    TransformResult::NoConflict => StageResult::Success { new_zenith_id: new_id, invalidation_map: None },
+                    TransformResult::HumanReview { .. } => StageResult::Conflict(result),
+                    TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id, invalidation_map: None },
+                };
+                response
+            },
+            Err(e) => {
+                warn!("[RPC] stage failed, rolling back to snapshot: {}", e);
+                vfs.restore_snapshot().ok(); // Restore last known good state
+                StageResult::Error(e.to_string())
+            }
         };
-        self.state.rpc_history.insert(tx_id, response.clone());
-        
+
+        self.state.rpc_history.insert(tx_id, result.clone());
         let _ = self.state.hmr_tx.send("stage".to_string());
-        
-        Ok(response)
+        Ok(result)
     }
 
     async fn stage_batch(&self, tx_id: String, zenith_id: ZenithId, styles: HashMap<String, String>) -> RpcResult<StageResult> {
@@ -239,19 +256,31 @@ impl ZenithApiServer for ZenithRpc {
         };
 
         let mut vfs = self.state.vfs.write().await;
+        
+        // v12.8 Hardening: Atomic Snapshot Rollback
+        vfs.create_snapshot();
+        
         let project_root = self.state.project_root.clone();
-        let (result, new_id) = vfs.stage_mutation(tx, intent, &project_root).map_err(internal_error)?;
-        
-        let response = match result {
-            TransformResult::NoConflict => StageResult::Success { new_zenith_id: new_id },
-            TransformResult::HumanReview { .. } => StageResult::Conflict(result),
-            TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id },
+        let result = match vfs.stage_mutation(tx, intent, &project_root) {
+            Ok((result, new_id)) => {
+                vfs.commit_snapshot();
+                let response = match result {
+                    TransformResult::NoConflict => StageResult::Success { new_zenith_id: new_id, invalidation_map: None },
+                    TransformResult::HumanReview { .. } => StageResult::Conflict(result),
+                    TransformResult::AutoMerge { .. } => StageResult::Success { new_zenith_id: new_id, invalidation_map: None },
+                };
+                response
+            },
+            Err(e) => {
+                warn!("[RPC] stage_batch failed, rolling back to snapshot: {}", e);
+                vfs.restore_snapshot().ok();
+                StageResult::Error(e.to_string())
+            }
         };
-        self.state.rpc_history.insert(tx_id, response.clone());
         
+        self.state.rpc_history.insert(tx_id, result.clone());
         let _ = self.state.hmr_tx.send("stage_batch".to_string());
-        
-        Ok(response)
+        Ok(result)
     }
 
 

@@ -443,7 +443,7 @@ impl OtEngine {
             // Rule 1: Reorder + ExtractComponent → Rebase reorder inside new component
             (
                 MutationIntent::Reorder { parent: _, new_order, old_order, timestamp: h_ts, .. },
-                MutationIntent::ExtractComponent { nodes, new_component_name, timestamp: a_ts },
+                MutationIntent::ExtractComponent { nodes, new_component_name, timestamp: _a_ts },
             ) => {
                 if new_order.iter().all(|n| nodes.contains(n)) {
                     TransformResult::AutoMerge {

@@ -1,5 +1,6 @@
-import { StateCreator } from 'zustand';
-import { SelectionSignature } from './useSelectionStore';
+import type { StateCreator } from 'zustand';
+import type { SelectionSignature } from './types';
+import { normalizeStyles } from './utils';
 
 export interface GhostSlice {
   elementSignature: SelectionSignature | null;

@@ -10,7 +10,7 @@
 //! We do NOT fsync on every scrub tick — only on release events.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write, Seek};
+use std::io::{self, BufReader, BufWriter, Write, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -62,6 +62,23 @@ pub struct WalWriter {
     path: PathBuf,
     file: Option<BufWriter<File>>,
     entries_since_sync: usize,
+}
+
+impl Clone for WalWriter {
+    fn clone(&self) -> Self {
+        let file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&self.path)
+            .ok()
+            .map(BufWriter::new);
+        
+        Self {
+            path: self.path.clone(),
+            file,
+            entries_since_sync: self.entries_since_sync,
+        }
+    }
 }
 
 impl WalWriter {
@@ -236,9 +253,16 @@ mod tests {
         
         let mut writer = WalWriter::open(&wal_path)?;
         let entry = WalEntry::new_patch(
-            "tx1".into(),
+            uuid::Uuid::new_v4(),
             "test.js".into(),
-            vec![TextEdit { range: 0..0, new_text: "hello".into() }]
+            vec![TextEdit {
+                start_line: 1,
+                start_col: 1,
+                end_line: 1,
+                end_col: 1,
+                old_text: "".into(),
+                new_text: "hello".into(),
+            }]
         );
         writer.append(&entry)?;
         writer.sync_all()?;

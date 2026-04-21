@@ -48,6 +48,9 @@ const Artboard: React.FC<{
   const zoom = useCanvasStore(state => state.zoom);
   const { interaction, guides, handleResizeStart, handleDragStart } = useArtboardInteraction(iframeRef, zoom);
   const isDragging = useSelectionStore(state => state.isDragging);
+  const dropTargetRect = useSelectionStore(state => state.dropTargetRect);
+  const insertionRect = useSelectionStore(state => state.insertionRect);
+  const isDropTargetInvalid = useSelectionStore(state => state.isDropTargetInvalid);
 
   const handleMouseMove = (e: React.PointerEvent) => {
     if (previewMode || !iframeRef.current || e.buttons === 4) return; // 4 is middle button held
@@ -153,6 +156,12 @@ const Artboard: React.FC<{
       if (data.type === 'zenithSceneBoundsUpdate' && !previewMode) {
           (window as any).__ZENITH_SCENE_BOUNDS__ = data.bounds;
       }
+      if (data.type === 'zenithTextUpdate' && !previewMode) {
+          useSelectionStore.getState().actions.updateText(data.zenithId, data.content);
+      }
+      if (data.type === 'zenithEditingState' && !previewMode) {
+          useSelectionStore.getState().actions.setEditingText(data.editing);
+      }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
@@ -212,6 +221,21 @@ const Artboard: React.FC<{
              {/* Alignment Guides for Smart Snapping */}
              <SnapGuides guides={guides} artboardRect={{ width: w, height: h }} />
              
+             {/* DND Structural Indicators */}
+             {isDragging && dropTargetRect && (
+               <SelectionOverlay 
+                 rect={dropTargetRect} 
+                 isDropTarget 
+                 isInvalid={isDropTargetInvalid} 
+               />
+             )}
+             {isDragging && insertionRect && (
+               <SelectionOverlay 
+                 rect={insertionRect} 
+                 isInsertion 
+               />
+             )}
+
              <SelectionOverlay 
                rect={hoverRect} 
                color="#00f2ff" 
@@ -408,4 +432,3 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
     </div>
   );
 }
-

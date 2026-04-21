@@ -87,8 +87,21 @@ export interface PatchInstructions {
   /** Duplicate this element as next sibling */
   duplicate?: boolean;
 
+  /** Reparent this element to a different container */
+  reparent?: {
+    /** zenithId of the new parent container */
+    newParentId: string;
+    /** New index within the new parent's children */
+    index: number;
+  };
+
   /** Optional tag verification to prevent ID drift */
   expectedTag?: string;
+
+  /** v14.0: Structural Content Editability */
+  contentUpdate?: {
+    text: string;
+  };
 }
 
 export class LogicLockedError extends Error {
@@ -388,9 +401,15 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
     }
   } else {
     // ── 2. STYLE PATCH ─────────────────────────────────────────────────────
+    // ── 2. STYLE PATCH ─────────────────────────────────────────────────────
     if (instructions.styles) updateStyleAttribute(node, instructions.styles);
     if (instructions.className !== undefined) updateAttribute(node, "className", instructions.className);
     if (instructions.textContent !== undefined) updateTextContent(jsxElement, instructions.textContent);
+    
+    // v14.0: Structural Content Editability
+    if (instructions.contentUpdate) {
+      updateTextContent(jsxElement, instructions.contentUpdate.text);
+    }
 
     // ── 5. INSERT CHILD ─────────────────────────────────────────────────────
     if (instructions.insert) {
@@ -403,6 +422,82 @@ export function patchSourceFile(source: string, instructions: PatchInstructions)
         if (target) jsxElement.children.splice(jsxElement.children.indexOf(target), 0, newEl);
         else jsxElement.children.push(newEl);
       } else jsxElement.children.push(newEl);
+    }
+
+    // ── 6. REPARENT (v14.0) ────────────────────────────────────────────────
+    if (instructions.reparent) {
+      const { newParentId, index } = instructions.reparent;
+      safeLog(`[STRUCTURAL] Initiating reparent mutation to: ${newParentId} at index ${index}`);
+      
+      const elementToMove = jsxElement; 
+      const oldContainer = jsxElementPath.parentPath.container;
+      const oldIdx = oldContainer.indexOf(elementToMove);
+      
+      // v14.2: Robust Destination Resolution
+      let destinationParent: t.JSXElement | null = null;
+      
+      function findParentRecursive(currentRoot: any, targetId: string): t.JSXElement | null {
+        const parts = targetId.split(":");
+        const selector = parts.slice(1);
+        
+        let current: any = currentRoot;
+        for (const segment of selector) {
+          const [tag, idxStr] = segment.split(".");
+          const idx = parseInt(idxStr, 10);
+          
+          const children = current.children || [];
+          const jsxChildren = children.filter((c: any) => t.isJSXElement(c));
+          if (idx < jsxChildren.length) {
+            current = jsxChildren[idx];
+            if (getTagName(current.openingElement.name) !== tag) {
+               // Tag mismatch: attempt recovery or skip
+            }
+          } else {
+            return null;
+          }
+        }
+        return current;
+      }
+
+      // Re-traversals are expensive, but necessary for cross-component stability in the same file
+      (traverse as any)(ast, {
+        JSXElement(p: any) {
+          if (destinationParent) return;
+          const tagName = getTagName(p.node.openingElement.name);
+          const firstSegment = destIdParts[1]?.split(".")[0];
+          if (tagName === firstSegment) {
+            // Verify if this is the root matching the ID
+            const found = findParentRecursive(p.node, newParentId.replace(/.*:/, `${destIdParts[0]}:`));
+            if (found) {
+              destinationParent = found;
+              p.stop();
+            }
+          }
+        }
+      });
+
+      if (destinationParent && t.isJSXElement(destinationParent)) {
+        if (oldIdx !== -1) {
+          oldContainer.splice(oldIdx, 1); // Extract
+          // Ensure we don't insert into a self-closing tag
+          if (destinationParent.openingElement.selfClosing) {
+            destinationParent.openingElement.selfClosing = false;
+            destinationParent.closingElement = t.jsxClosingElement(t.cloneNode(destinationParent.openingElement.name));
+          }
+          
+          const jsxChildren = destinationParent.children.filter(c => t.isJSXElement(c) || t.isJSXFragment(c));
+          const targetSibling = jsxChildren[Math.min(index, jsxChildren.length)];
+          if (targetSibling) {
+             const realIdx = destinationParent.children.indexOf(targetSibling);
+             destinationParent.children.splice(realIdx, 0, elementToMove);
+          } else {
+             destinationParent.children.push(elementToMove);
+          }
+          safeLog(`[STRUCTURAL] Reparent successful: ${instructions.zenithId} -> ${newParentId}`);
+        }
+      } else {
+        safeLog(`[STRUCTURAL] Reparent FAILED: Could not find destination ${newParentId}`);
+      }
     }
   }
 

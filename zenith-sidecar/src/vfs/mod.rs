@@ -143,10 +143,26 @@ pub struct VirtualFileSystem {
     /// Staged intents for conflict resolution (v3.8)
     pub staged_intents: HashMap<TransactionId, Vec<crate::conflict::ot_engine::MutationIntent>>,
 
-    /// Transaction arrival order for deterministic COW rebuilds (v11.7.4 Audit fix)
-    transaction_order: Vec<TransactionId>,
-
     /// Ghost-ID Registry for Base62 -> surgical position resolution (GR1 Fix)
+    pub ghost_registry: GhostRegistry,
+
+    /// v12.8: Active structural snapshot (if any)
+    pub active_snapshot: Option<VfsSnapshot>,
+}
+
+/// v12.8: Structural snapshot of the VFS state for atomic rollbacks.
+/// 
+/// This captures all staging layers (transactions, intents, caches) but 
+/// excludes the base disk layer (which is immutable) and the WAL handle.
+#[derive(Clone)]
+pub struct VfsSnapshot {
+    pub transactions: HashMap<TransactionId, Vec<FilePatch>>,
+    pub merged_cache: im::HashMap<PathBuf, Arc<String>>,
+    pub file_locks: HashMap<PathBuf, TransactionId>,
+    pub history: HistoryManager,
+    pub draft_transactions: HashSet<TransactionId>,
+    pub staged_intents: HashMap<TransactionId, Vec<crate::conflict::ot_engine::MutationIntent>>,
+    pub transaction_order: Vec<TransactionId>,
     pub ghost_registry: GhostRegistry,
 }
 
@@ -172,6 +188,7 @@ impl VirtualFileSystem {
             staged_intents: HashMap::new(),
             transaction_order: Vec::new(),
             ghost_registry: GhostRegistry::new(),
+            active_snapshot: None,
         }
     }
 
@@ -200,6 +217,7 @@ impl VirtualFileSystem {
             staged_intents: HashMap::new(),
             transaction_order: Vec::new(),
             ghost_registry: GhostRegistry::new(),
+            active_snapshot: None,
         })
     }
 
@@ -438,6 +456,52 @@ impl VirtualFileSystem {
             .get(path)
             .map(|s| s.as_str())
             .or_else(|| self.base.get(path).map(|s| s.content.as_str()))
+    }
+
+    /// Take a structural snapshot of the current staging state (v12.8).
+    pub fn create_snapshot(&mut self) {
+        let snapshot = VfsSnapshot {
+            transactions: self.transactions.clone(),
+            merged_cache: self.merged_cache.clone(),
+            file_locks: self.file_locks.clone(),
+            history: self.history.clone(),
+            draft_transactions: self.draft_transactions.clone(),
+            staged_intents: self.staged_intents.clone(),
+            transaction_order: self.transaction_order.clone(),
+            ghost_registry: self.ghost_registry.clone(),
+        };
+        self.active_snapshot = Some(snapshot);
+        debug!("[VFS] Structural snapshot created");
+    }
+
+    /// Restore the staging state from the active snapshot (v12.8).
+    pub fn restore_snapshot(&mut self) -> Result<()> {
+        let snapshot = self.active_snapshot.take()
+            .ok_or_else(|| anyhow!("No active snapshot to restore"))?;
+        
+        self.transactions = snapshot.transactions;
+        self.merged_cache = snapshot.merged_cache;
+        self.file_locks = snapshot.file_locks;
+        self.history = snapshot.history;
+        self.draft_transactions = snapshot.draft_transactions;
+        self.staged_intents = snapshot.staged_intents;
+        self.transaction_order = snapshot.transaction_order;
+        self.ghost_registry = snapshot.ghost_registry;
+        
+        // v12.8: We don't rollback the WAL physically here (it's append-only),
+        // but since we've restored memory state, future persists will 
+        // ignore the "junk" entries in the WAL because they won't be in `self.transactions`.
+        
+        info!("[VFS] Structural snapshot restored (Atomic Rollback)");
+        Ok(())
+    }
+
+    /// Clear the active snapshot without restoring it.
+    pub fn commit_snapshot(&mut self) {
+        if self.active_snapshot.is_some() {
+            self.active_snapshot = None;
+            debug!("[VFS] Structural snapshot committed (Success)");
+        }
     }
 
 
@@ -1534,6 +1598,55 @@ mod tests {
     }
 
     #[test]
+    fn test_atomic_snapshot_restore() {
+        let mut vfs = VirtualFileSystem::new();
+        let path = PathBuf::from("src/App.tsx");
+        vfs.load_file(path.clone(), "original".to_string());
+
+        // 1. Create initial state
+        let tx1 = tx();
+        vfs.stage(tx1, FilePatch {
+            file: path.clone(),
+            edits: vec![TextEdit {
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 8,
+                old_text: "original".into(),
+                new_text: "state1".into(),
+            }],
+        });
+
+        // 2. Take snapshot
+        vfs.create_snapshot();
+        assert!(vfs.active_snapshot.is_some());
+
+        // 3. Mutate further
+        let tx2 = tx();
+        vfs.stage(tx2, FilePatch {
+            file: path.clone(),
+            edits: vec![TextEdit {
+                start_line: 1,
+                start_col: 0,
+                end_line: 1,
+                end_col: 6,
+                old_text: "state1".into(),
+                new_text: "state2".into(),
+            }],
+        });
+        assert_eq!(vfs.read(&path).unwrap(), "state2");
+        assert_eq!(vfs.transactions.len(), 2);
+
+        // 4. Restore snapshot
+        vfs.restore_snapshot().unwrap();
+        assert!(vfs.active_snapshot.is_none());
+        
+        // 5. Verify state reverted to state1
+        assert_eq!(vfs.read(&path).unwrap(), "state1");
+        assert_eq!(vfs.transactions.len(), 1);
+        assert!(vfs.transactions.contains_key(&tx1));
+        assert!(!vfs.transactions.contains_key(&tx2));
+    #[test]
     fn test_cow_base_layer_isolation() {
         let mut vfs = VirtualFileSystem::new();
         let path = PathBuf::from("src/Test.tsx");
@@ -1573,7 +1686,7 @@ mod tests {
                     }],
                 ))
                 .unwrap();
-            writer.sync().unwrap();
+            writer.sync_all().unwrap();
         }
 
         // Recover

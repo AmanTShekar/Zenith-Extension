@@ -48,7 +48,7 @@ struct Args {
     /// If provided, the sidecar loads/saves the ghost index here instead of .zenith/
     global_index_path: Option<PathBuf>,
     /// Log level override (maps to RUST_LOG)
-    _log_level: String,
+    log_level: String,
     /// Framework provided by the extension's robust TS detector
     framework: Option<String>,
     /// Target port for the sandbox header stripper (Header Mirroring)

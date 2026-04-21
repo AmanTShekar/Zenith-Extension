@@ -1,0 +1,171 @@
+:root {
+  --color-base: #020202;
+  --color-surface: #080808;
+  --color-accent: #00f0ff;
+  --color-accent-dim: rgba(0, 240, 255, 0.05);
+  --color-border: rgba(255, 255, 255, 0.05);
+  --color-text: #ffffff;
+  --color-text-dim: #a3a3a3;
+  
+  --glass-bg: rgba(255, 255, 255, 0.02);
+  --glass-blur: blur(20px);
+}
+
+.demo-container {
+  min-height: 100vh;
+  background-color: var(--color-base);
+  color: var(--color-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  padding: 80px 40px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Surgical Grid Background */
+.demo-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 2px 2px, rgba(255,255,255,0.03) 1px, transparent 0);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+/* Hero Section */
+.hero {
+  max-width: 1000px;
+  width: 100%;
+  margin-bottom: 80px;
+  text-align: center;
+  position: relative;
+}
+
+.hero h1 {
+  font-size: 5rem;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  line-height: 0.9;
+}
+
+.hero h1 span.accent {
+  color: var(--color-accent);
+  text-shadow: 0 0 30px rgba(0, 240, 255, 0.3);
+}
+
+.hero p {
+  font-size: 1.25rem;
+  color: var(--color-text-dim);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Card Grid */
+.grid-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 32px;
+  width: 100%;
+  max-width: 1200px;
+  z-index: 1;
+}
+
+/* Surgical Card */
+.surgical-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+  padding: 40px;
+  position: relative;
+  transition: all 0.4s cubic-bezier(0.19, 1, 0.22, 1);
+  overflow: hidden;
+}
+
+.surgical-card:hover {
+  border-color: rgba(0, 240, 255, 0.2);
+  background: rgba(255, 255, 255, 0.03);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 80px -20px rgba(0,0,0,0.8);
+}
+
+.surgical-card h2 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin-bottom: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-dim);
+}
+
+/* Status Indicator */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 100px;
+  color: #10b981;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #10b981;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+/* Action Button */
+.btn-surgical {
+  padding: 16px 32px;
+  background: var(--color-accent);
+  color: #000;
+  border: none;
+  border-radius: 12px;
+  font-weight: 900;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 0 40px rgba(0, 240, 255, 0.2);
+}
+
+.btn-surgical:hover {
+  transform: scale(1.02);
+  box-shadow: 0 0 60px rgba(0, 240, 255, 0.4);
+}
+
+.btn-surgical:active {
+  transform: scale(0.98);
+}
+
+/* Grainy Texture */
+.demo-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.02;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
