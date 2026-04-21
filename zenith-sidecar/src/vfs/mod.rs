@@ -20,14 +20,20 @@
 pub mod ghost_registry;
 pub mod mock_engine;
 pub mod wal;
+pub mod history;
+pub mod engine;
+pub mod storage;
 
 pub use ghost_registry::{GhostEntry, GhostRegistry};
 pub use mock_engine::{MockOverlayEngine, StateScanner, HmrInjector};
 pub use wal::{WalEntry, WalReader, WalWriter};
+pub use history::{HistoryManager, UndoFrame};
+pub use engine::{FilePatch, FileWrite, TextEdit, TransactionId, apply_edits};
+pub use storage::StorageManager;
 
 use crate::types::ZenithId;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -35,7 +41,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use tracing::{debug, info, warn};
-use walkdir::WalkDir;
+// use walkdir::WalkDir;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VfsError {
@@ -55,10 +61,7 @@ pub enum VfsError {
     Io(#[from] std::io::Error),
 }
 
-use crate::types::TextEdit;
-
-// Re-export TransactionId for convenience
-pub use crate::types::TransactionId;
+// TransactionId re-exported via engine.rs
 
 // ---------------------------------------------------------------------------
 // File snapshot
@@ -101,19 +104,7 @@ pub struct SelectionSignature {
     pub text_content: String,
     pub xpath: String,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FilePatch {
-    pub file: PathBuf,
-    pub edits: Vec<TextEdit>,
-}
-
-/// A prepared file write (output of commit).
-#[derive(Debug, Clone)]
-pub struct FileWrite {
-    pub file: PathBuf,
-    pub content: String,
-}
+// FilePatch and FileWrite are imported from submodules.
 
 // ---------------------------------------------------------------------------
 // VFS v2.6 — COW overlays + WAL persistence
@@ -127,25 +118,19 @@ pub struct VirtualFileSystem {
     /// Base layer: file content on disk (immutable COW snapshots).
     base: im::HashMap<PathBuf, Arc<FileSnapshot>>,
 
-    /// Overlay: pending patches per transaction.
-    pub transactions: HashMap<TransactionId, Vec<FilePatch>>,
-
-    /// Merged cache: base + all active patches applied (COW overlay).
+    /// Staging: TransactionId -> Vector of File Patches
+    transactions: HashMap<TransactionId, Vec<FilePatch>>,
+    
+    /// Merged Cache: Path -> Final Content Arc (rebuilt on mutation)
     merged_cache: im::HashMap<PathBuf, Arc<String>>,
-
-    /// File-level locks for two-phase commit.
+    
+    /// File Locks: Path -> TransactionId holding the freeze
     file_locks: HashMap<PathBuf, TransactionId>,
 
-    /// Visual undo stack (separate from VS Code's text undo).
-    undo_stack: VecDeque<UndoFrame>,
+    /// Visual Undo/Redo Engine
+    history: HistoryManager,
 
-    /// Redo stack.
-    redo_stack: Vec<UndoFrame>,
-
-    /// Max undo frames.
-    max_undo_frames: usize,
-
-    /// Draft transactions — can be staged and read but NEVER committed.
+    /// Draft Filter: Transactions that should NOT be persisted to disk
     /// Used by MockOverlayEngine for non-destructive state injection.
     draft_transactions: HashSet<TransactionId>,
 
@@ -174,14 +159,13 @@ pub enum ViewMode {
 impl VirtualFileSystem {
     /// Create a new VFS without WAL (in-memory only, for tests).
     pub fn new() -> Self {
+        let max_frames = 500;
         Self {
             base: im::HashMap::new(),
             transactions: HashMap::new(),
             merged_cache: im::HashMap::new(),
             file_locks: HashMap::new(),
-            undo_stack: VecDeque::new(),
-            redo_stack: Vec::new(),
-            max_undo_frames: 500,
+            history: HistoryManager::new(max_frames),
             draft_transactions: HashSet::new(),
             view_mode: ViewMode::Shadow,
             stage_wal: None,
@@ -203,14 +187,13 @@ impl VirtualFileSystem {
         let writer = WalWriter::open(&wal_path)
             .map_err(|e| anyhow::anyhow!("Failed to open WAL at {}: {}", wal_path.display(), e))?;
 
+        let max_frames = 500;
         Ok(Self {
             base: im::HashMap::new(),
             transactions: HashMap::new(),
             merged_cache: im::HashMap::new(),
             file_locks: HashMap::new(),
-            undo_stack: VecDeque::new(),
-            redo_stack: Vec::new(),
-            max_undo_frames: 500,
+            history: HistoryManager::new(max_frames),
             draft_transactions: HashSet::new(),
             view_mode: ViewMode::Shadow,
             stage_wal: Some(writer),
@@ -418,7 +401,7 @@ impl VirtualFileSystem {
 
     /// Autonomous Heal: Clears all staging state and truncates the WAL.
     /// v11.8: System Recovery Spine.
-    pub fn heal(&mut self, zenith_dir: &Path) -> Result<()> {
+    pub fn heal(&mut self, _zenith_dir: &Path) -> Result<()> {
         info!("[SIDECAR] VFS HEAL: Clearing all transactions and truncating WAL");
         
         // 1. Clear staging state
@@ -909,7 +892,7 @@ impl VirtualFileSystem {
         // 🚀 Invoke Babel AST Surgical Engine
         let patched_content = self.call_surgical_node(&base_content, &instructions)?;
 
-        let last_line_len = base_content.lines().last().map(|l| l.len()).unwrap_or(0);
+        let _last_line_len = base_content.lines().last().map(|l| l.len()).unwrap_or(0);
 
         Ok((path, TextEdit {
             start_line: 1,
@@ -1121,7 +1104,7 @@ impl VirtualFileSystem {
         }).collect();
 
         let undo_frame = UndoFrame {
-            id: self.undo_stack.len() as u64,
+            id: self.history.undo_stack.len() as u64,
             description,
             transaction_id: tx,
             forward_patches: vec![patch.clone()],
@@ -1295,17 +1278,13 @@ impl VirtualFileSystem {
     // -----------------------------------------------------------------------
 
     fn push_undo(&mut self, frame: UndoFrame) {
-        self.redo_stack.clear(); // New action invalidates redo
-        self.undo_stack.push_back(frame);
-        if self.undo_stack.len() > self.max_undo_frames {
-            self.undo_stack.pop_front();
-        }
+        self.history.push(frame);
     }
 
     /// Visual undo — applies reverse patches to VFS.
     /// v3.10 Fix (H3): Uses a fresh TransactionId so the reverse patch can be committed.
     pub fn visual_undo(&mut self) -> Option<String> {
-        let mut frame = self.undo_stack.pop_back()?;
+        let mut frame = self.history.pop_undo()?;
         let description = frame.description.clone();
 
         // Use a fresh tx so reverse patches are committable
@@ -1315,7 +1294,7 @@ impl VirtualFileSystem {
             self.stage(undo_tx, patch.clone());
         }
 
-        self.redo_stack.push(frame);
+        self.history.push_redo(frame);
         debug!("Visual undo: {description}");
         Some(description)
     }
@@ -1323,7 +1302,7 @@ impl VirtualFileSystem {
     /// Visual redo.
     /// v3.10 Fix (H3): Uses a fresh TransactionId so the forward patch can be committed.
     pub fn visual_redo(&mut self) -> Option<String> {
-        let mut frame = self.redo_stack.pop()?;
+        let mut frame = self.history.pop_redo()?;
         let description = frame.description.clone();
 
         let redo_tx = uuid::Uuid::new_v4();
@@ -1332,19 +1311,19 @@ impl VirtualFileSystem {
             self.stage(redo_tx, patch.clone());
         }
 
-        self.undo_stack.push_back(frame);
+        self.history.push_undo_back(frame);
         debug!("Visual redo: {description}");
         Some(description)
     }
 
     /// Number of undo frames available.
     pub fn undo_depth(&self) -> usize {
-        self.undo_stack.len()
+        self.history.undo_stack.len()
     }
 
     /// Number of redo frames available.
     pub fn redo_depth(&self) -> usize {
-        self.redo_stack.len()
+        self.history.redo_stack.len()
     }
 
     /// Clear all pending transactions and draft states.
@@ -1358,6 +1337,29 @@ impl VirtualFileSystem {
     }
 
     /// Get a human-readable diff for a file (New 3).
+    pub fn persist(&mut self, project_root: &Path) -> Result<()> {
+        info!("Persisting VFS transactions to disk...");
+        
+        // Delegate file writing and security checks to StorageManager
+        StorageManager::persist(project_root, &self.merged_cache, &self.base)?;
+
+        // Reconcile base layer (memory-only update of the original snapshots)
+        for (file_path, content) in self.merged_cache.iter() {
+             self.base.insert(file_path.clone(), Arc::new(FileSnapshot::from_content(content.to_string())));
+        }
+
+        if let Some(ref mut wal) = self.stage_wal {
+            if let Err(e) = wal.truncate() {
+                warn!("  WAL truncate failed after persist: {} (Staging may replay redundant edits on restart)", e);
+            } else {
+                debug!("  WAL truncated successfully");
+            }
+        }
+        
+        info!("VFS Persisted successfully.");
+        Ok(())
+    }
+
     pub fn get_diff(&self, path: &Path) -> Result<String> {
         let base = self.base.get(path)
             .ok_or_else(|| anyhow::anyhow!("File not loaded in VFS base: {:?}", path))?;
@@ -1368,18 +1370,13 @@ impl VirtualFileSystem {
         let base_lines: Vec<&str> = base.content.lines().collect();
         let merged_lines: Vec<&str> = merged.lines().collect();
 
-        // Simple line-by-line comparison (unified diff style)
-        // Optimized for small component changes
         let mut i = 0;
         let mut j = 0;
 
         while i < base_lines.len() || j < merged_lines.len() {
             if i < base_lines.len() && j < merged_lines.len() && base_lines[i] == merged_lines[j] {
-                // Same line (skip for brevity or show context)
-                // For a "preview", we might want to show only changed lines
                 i += 1; j += 1;
             } else {
-                // Simple greedy diff (good enough for surgical edits)
                 if i < base_lines.len() {
                     diff.push_str("- ");
                     diff.push_str(base_lines[i]);
@@ -1401,114 +1398,6 @@ impl VirtualFileSystem {
             Ok(diff)
         }
     }
-
-    /// Persist all staged transactions to the real filesystem.
-    /// This is a synchronous operation (blocking) because it involves file I/O.
-    pub fn persist(&mut self, project_root: &Path) -> Result<()> {
-        info!("Persisting VFS transactions to disk...");
-
-        let project_root = std::fs::canonicalize(project_root)?;
-
-        // Collect changed file paths from merged cache
-        let changed_files: Vec<PathBuf> = self.merged_cache.keys().cloned().collect();
-
-        if changed_files.is_empty() {
-            info!("  Nothing to persist (staging buffer empty)");
-            return Ok(());
-        }
-
-        for file_path in changed_files {
-            if let Some(content) = self.merged_cache.get(&file_path) {
-                let full_path = project_root.join(&file_path);
-                
-                // Robust Security Check: Ensure we don't escape the project root.
-                // On Windows, handle UNC prefixes and be case-insensitive.
-                let norm_full = full_path.to_string_lossy().replace("\\", "/").replace("//?/", "");
-                let norm_root = project_root.to_string_lossy().replace("\\", "/").replace("//?/", "");
-
-                // Ensure both strings end with / for proper prefix matching
-                let norm_full_cmp = if norm_full.ends_with('/') { norm_full.to_string() } else { format!("{}/", norm_full) };
-                let norm_root_cmp = if norm_root.ends_with('/') { norm_root.to_string() } else { format!("{}/", norm_root) };
-
-                let is_inside = if cfg!(windows) {
-                    norm_full_cmp.to_lowercase().starts_with(&norm_root_cmp.to_lowercase())
-                } else {
-                    norm_full_cmp.starts_with(&norm_root_cmp)
-                };
-
-                if !is_inside && !norm_full.to_lowercase().starts_with(&norm_root.to_lowercase()) {
-                    warn!("🔥 Security violation attempt blocked: attempt to write outside project root: {} (Root: {})", norm_full, norm_root);
-                    return Err(anyhow!("Security violation: path {} is outside project root {}", norm_full, norm_root));
-                }
-
-                // Ensure the parent directory exists
-                if let Some(parent) = full_path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-
-                // Surgical In-Place Write (v11.7.6 Windows Hardening)
-                // Atomic rename fails on Windows when Vite/Watcher has a lock. 
-                // We use direct write with a retry loop to ensure persistence.
-                let mut attempts = 0;
-                let mut success = false;
-                while attempts < 5 && !success {
-                    match std::fs::OpenOptions::new()
-                        .write(true)
-                        .truncate(true)
-                        .create(true)
-                        .open(&full_path) 
-                    {
-                        Ok(mut file) => {
-                            use std::io::Write;
-                            if let Err(e) = file.write_all(content.as_bytes()) {
-                                tracing::error!("Failed to write to file {:?}: {}", full_path, e);
-                                return Err(anyhow!("File I/O error during surgical write: {}", e));
-                            }
-                            // Ensure data is on disk before we consider it a success
-                            file.sync_all()?;
-                            success = true;
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(5) => {
-                            attempts += 1;
-                            warn!("  ⚠️ File lock detected on {:?}. Retrying in 200ms... (Attempt {})", file_path, attempts);
-                            std::thread::sleep(std::time::Duration::from_millis(200));
-                        }
-                        Err(e) => return Err(anyhow!("Failed to open file {:?} for write: {}", full_path, e)),
-                    }
-                }
-                
-                if !success {
-                    return Err(anyhow!("Surgical persistence failed: File {:?} is currently locked by another process (likely the Vite watcher). Close other editors or stop the server briefly if this persists.", file_path));
-                }
-
-                info!("  ✅ Persisted: {:?}", file_path);
-                
-                // Audit the persisted content (first 100 bytes)
-                let preview = if content.len() > 100 { &content[..100] } else { &content };
-                debug!("  📄 Content preview: {:?}", preview);
-
-                // Reconcile base layer (memory-only update of the original snapshots)
-                self.base.insert(file_path, Arc::new(FileSnapshot::from_content(content.to_string())));
-            }
-        }
-
-        // v3.10 Fix: Ensure all renamed files are flushed to disk before truncating WAL (Issue 15)
-        // This prevents a crash where the rename is in the OS buffer but not on disk, 
-        // while the WAL is already gone.
-        
-        if let Some(ref mut wal) = self.stage_wal {
-            if let Err(e) = wal.truncate() {
-                warn!("  WAL truncate failed after persist: {} (Staging may replay redundant edits on restart)", e);
-            } else {
-                debug!("  WAL truncated successfully");
-            }
-        }
-
-        // Clear staging once everything is physically committed
-        self.clear_staging();
-        info!("Persistence complete — WAL cleared, staging wiped.");
-        Ok(())
-    }
 }
 
 
@@ -1518,95 +1407,7 @@ impl Default for VirtualFileSystem {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Undo frame
-// ---------------------------------------------------------------------------
-
-/// A single undo-able visual operation.
-/// May span multiple files (e.g., JSX + CSS Module).
-#[derive(Debug, Clone)]
-pub struct UndoFrame {
-    pub id: u64,
-    pub description: String,
-    pub transaction_id: TransactionId,
-    pub forward_patches: Vec<FilePatch>,      // The change
-    pub reverse_patches: Vec<FilePatch>,      // The undo
-}
-
-// ---------------------------------------------------------------------------
-// Edit application
-// ---------------------------------------------------------------------------
-
-/// Apply a list of text edits to a source string.
-///
-/// Edits are applied in reverse order (bottom-up) to preserve earlier line
-/// numbers. v3.10 Fix (H2): Detects and preserves Windows CRLF line endings.
-fn apply_edits(source: &str, edits: &[TextEdit]) -> Result<String> {
-    // H2 Fix: Detect line ending from source to avoid stripping \r on Windows
-    let line_ending = if source.contains("\r\n") { "\r\n" } else { "\n" };
-
-    let mut lines: Vec<String> = source.lines().map(String::from).collect();
-    if lines.is_empty() && !source.is_empty() {
-        lines.push(source.to_string());
-    }
-
-    // Sort edits by position (descending) so we can apply bottom-up
-    let mut sorted_edits = edits.to_vec();
-    sorted_edits.sort_by(|a, b| {
-        b.start_line
-            .cmp(&a.start_line)
-            .then(b.start_col.cmp(&a.start_col))
-    });
-
-    for edit in &sorted_edits {
-        let start_line = edit.start_line as usize;
-        let end_line = edit.end_line as usize;
-
-        if start_line == 0 || end_line == 0 {
-            return Err(anyhow!("Line numbers are 1-indexed"));
-        }
-
-        let sl = start_line - 1; // Convert to 0-indexed
-        let el = end_line - 1;
-
-        if sl >= lines.len() {
-            // Append if beyond end of file
-            lines.push(edit.new_text.clone());
-            continue;
-        }
-
-        // Replace the range with the new text
-        let start_col = edit.start_col as usize;
-        let end_col = edit.end_col as usize;
-
-        if sl == el {
-            // Single-line edit
-            let line = &lines[sl];
-            let before = &line[..start_col.min(line.len())];
-            let after = &line[end_col.min(line.len())..];
-            lines[sl] = format!("{before}{}{after}", edit.new_text);
-        } else {
-            // Multi-line edit
-            let first_line = &lines[sl];
-            let before = &first_line[..edit.start_col.min(first_line.len() as u32) as usize];
-            let after = if el < lines.len() {
-                let last_line = &lines[el];
-                &last_line[edit.end_col.min(last_line.len() as u32) as usize..]
-            } else {
-                ""
-            };
-            
-            let replacement = format!("{before}{}{after}", edit.new_text);
-
-            // Remove the old lines and insert the replacement
-            let drain_end = (el + 1).min(lines.len());
-            lines.drain(sl..drain_end);
-            lines.insert(sl, replacement);
-        }
-    }
-
-    Ok(lines.join(line_ending))
-}
+// Unified Diff and History logic handled by submodules.
 
 // ---------------------------------------------------------------------------
 // Tests

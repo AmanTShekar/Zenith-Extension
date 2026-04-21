@@ -12,7 +12,7 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use http_body_util::{BodyExt, Full};
 use bytes::Bytes;
-use tracing::{info, error, warn, debug};
+use tracing::{info, error, warn};
 
 pub struct SandboxProxy {
     target_port: u16,

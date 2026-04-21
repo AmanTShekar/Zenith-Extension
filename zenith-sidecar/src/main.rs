@@ -28,7 +28,7 @@ use tracing::{info, error, warn};
 
 use zenith_sidecar::conflict::ConflictResolver;
 use zenith_sidecar::rebase::RebaseEngine;
-use zenith_sidecar::hot_path::predictive::{PredictivePatcher, PrecomputedPatch, PredictCacheKey};
+use zenith_sidecar::hot_path::predictive::PredictivePatcher;
 use zenith_sidecar::hot_path::ring_buffer::{RingBufferConsumer, SAB_TOTAL_SIZE};
 use zenith_sidecar::ledger::ChangeLedger;
 use zenith_sidecar::types::*;
@@ -48,7 +48,7 @@ struct Args {
     /// If provided, the sidecar loads/saves the ghost index here instead of .zenith/
     global_index_path: Option<PathBuf>,
     /// Log level override (maps to RUST_LOG)
-    log_level: String,
+    _log_level: String,
     /// Framework provided by the extension's robust TS detector
     framework: Option<String>,
     /// Target port for the sandbox header stripper (Header Mirroring)
@@ -216,7 +216,7 @@ async fn main() {
     let mut recovery_msg = None;
     let vfs = match VirtualFileSystem::recover_from_wal(&zenith_dir) {
         Ok(recovered) => {
-            let count = recovered.transactions.len();
+            let count = recovered.active_transactions().len();
             if count > 0 {
                 recovery_msg = Some(format!("Recovered {} staged changes from previous session", count));
             }
@@ -288,7 +288,7 @@ async fn main() {
 
     if let Some(ref sab_path) = args.sab_path {
         let sab_path = sab_path.clone();
-        let reverse_map = id_reverse_map.clone();
+        let _reverse_map = id_reverse_map.clone();
         let predict_tx = predict_tx.clone();
 
         std::thread::Builder::new()
@@ -382,7 +382,7 @@ async fn main() {
     // -----------------------------------------------------------------------
 
     // v12.7 CSS Hardening: Broadcast channel for real-time CSS overrides
-    let (css_broadcast_tx, _css_broadcast_rx) = tokio::sync::broadcast::channel::<crate::types::CssOverride>(1024);
+    let (css_broadcast_tx, _css_broadcast_rx) = tokio::sync::broadcast::channel::<CssOverride>(1024);
 
     // CSS override forwarder (receives from hot path, sends to WebSocket clients)
     let css_broadcast_tx_clone = css_broadcast_tx.clone();

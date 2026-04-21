@@ -10,7 +10,7 @@
 //! We do NOT fsync on every scrub tick — only on release events.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write, Seek, SeekFrom};
+use std::io::{self, BufReader, BufWriter, Read, Write, Seek};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
