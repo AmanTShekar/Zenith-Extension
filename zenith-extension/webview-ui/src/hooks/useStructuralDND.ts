@@ -74,7 +74,7 @@ export const useStructuralDND = () => {
         
         // Primary sort by Y (rows), secondary by X (columns)
         // We use a rounding threshold to group elements into "rows"
-        const rowThreshold = Math.min(ra.height, rb.height) * 0.5;
+        const rowThreshold = Math.max(1, Math.min(ra.height, rb.height) * 0.5);
         const yDiff = Math.round(ay / rowThreshold) - Math.round(by / rowThreshold);
         return yDiff || ax - bx;
       });
@@ -85,8 +85,8 @@ export const useStructuralDND = () => {
         const r1 = sceneBounds.get(sortedChildren[0])!;
         const r2 = sceneBounds.get(sortedChildren[1])!;
         // If they share significant vertical overlap, it's horizontal
-        const verticalOverlap = Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top);
-        const minHeight = Math.min(r1.height, r2.height);
+        const verticalOverlap = Math.max(0, Math.min(r1.bottom, r2.bottom) - Math.max(r1.top, r2.top));
+        const minHeight = Math.max(1, Math.min(r1.height, r2.height));
         isHorizontal = verticalOverlap > minHeight * 0.6;
       } else if (bestParentRect) {
         // Fallback to aspect ratio of the container if it has no children yet

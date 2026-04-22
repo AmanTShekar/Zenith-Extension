@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type DeviceType = 'mobile' | 'tablet' | 'desktop';
+export type DeviceType = 'responsive' | 'mobile' | 'tablet' | 'desktop';
 
 interface CanvasState {
   zoom: number;
@@ -27,7 +27,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   pan: { x: 0, y: 0 },
   deviceWidth: 1440,
   deviceHeight: 900,
-  deviceType: 'desktop',
+  deviceType: 'responsive', // Default to responsive (100% viewport)
   orientation: 'landscape',
   viewMode: 'single',
   activeTool: 'select',

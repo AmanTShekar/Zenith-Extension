@@ -3,6 +3,9 @@ export interface Rect {
   y: number;
   width: number;
   height: number;
+  layoutWidth?: number;
+  layoutHeight?: number;
+  rotation?: number;
 }
 
 export interface SnapResult {

@@ -4,17 +4,41 @@ import { normalizeStyles } from './utils';
 
 export interface GhostSlice {
   elementSignature: SelectionSignature | null;
-  hoverRect: { x: number; y: number; width: number; height: number } | null;
+  hoverRect: { 
+    x: number; 
+    y: number; 
+    width: number; 
+    height: number;
+    layoutWidth?: number;
+    layoutHeight?: number;
+    rotation?: number;
+  } | null;
   hoverTag: string | null;
   isDragging: boolean;
   
   ghostActions: {
     setSelectedUniversal: (
       signature: SelectionSignature, 
-      rect: { x: number; y: number; width: number; height: number }, 
+      rect: { 
+        x: number; 
+        y: number; 
+        width: number; 
+        height: number;
+        layoutWidth?: number;
+        layoutHeight?: number;
+        rotation?: number;
+      }, 
       styles: Record<string, string>
     ) => void;
-    setHover: (rect: { x: number; y: number; width: number; height: number } | null, tag?: string) => void;
+    setHover: (rect: { 
+      x: number; 
+      y: number; 
+      width: number; 
+      height: number;
+      layoutWidth?: number;
+      layoutHeight?: number;
+      rotation?: number;
+    } | null, tag?: string) => void;
     setDragging: (isDragging: boolean) => void;
   };
 }

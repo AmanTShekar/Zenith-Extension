@@ -4,7 +4,15 @@ import { useSelectionStore } from '../stores';
 import { clsx } from 'clsx';
 
 interface SelectionOverlayProps {
-  rect: { x: number; y: number; width: number; height: number } | null;
+  rect: { 
+    x: number; 
+    y: number; 
+    width: number; 
+    height: number;
+    rotation?: number;
+    layoutWidth?: number;
+    layoutHeight?: number;
+  } | null;
   color?: string;
   isHover?: boolean;
   isDragging?: boolean;
@@ -31,8 +39,20 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
   const isEditingText = useSelectionStore(state => state.isEditingText);
   const { setEditingText } = useSelectionStore(state => state.actions);
   const hoverTag = useSelectionStore(state => state.hoverTag);
+  const computedStyles = useSelectionStore(state => state.computedStyles);
 
   if (!rect || isEditingText) return null;
+
+  // Rotation is critical for aligning the overlay with the actual DOM element
+  const rotation = rect.rotation || 0;
+  const useLayout = !!rect.rotation && !!rect.layoutWidth && !!rect.layoutHeight;
+  
+  // Calculate the center-aligned top-left for a rotated element
+  // This ensures the overlay matches the unrotated element's coordinate space
+  const overlayWidth = useLayout ? rect.layoutWidth! : rect.width;
+  const overlayHeight = useLayout ? rect.layoutHeight! : rect.height;
+  const overlayX = useLayout ? (rect.x + rect.width / 2 - overlayWidth / 2) : rect.x;
+  const overlayY = useLayout ? (rect.y + rect.height / 2 - overlayHeight / 2) : rect.y;
 
   // Insertion Line rendering (special case)
   if (isInsertion) {
@@ -81,17 +101,19 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
         }
       }}
       animate={isDragging && !isDropTarget ? false : {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
+        x: overlayX,
+        y: overlayY,
+        width: overlayWidth,
+        height: overlayHeight,
+        rotate: rotation,
         opacity: 1
       }}
       className={clsx(
         "absolute z-[9999]",
-        isHover && "pointer-events-none border border-cyan-400/30 border-dashed",
+        (isHover || isDragging) && "pointer-events-none",
+        isHover && "border border-cyan-400/30 border-dashed",
         isDropTarget && (isInvalid ? "zenith-drop-target-invalid" : "zenith-drop-target"),
-        !isHover && !isDropTarget && "pointer-events-auto border-[0.5px] border-[#00F0FF] shadow-[0_0_20px_rgba(0,240,255,0.1)]",
+        !isHover && !isDropTarget && !isDragging && "pointer-events-auto border-[0.5px] border-[#00F0FF] shadow-[0_0_20px_rgba(0,240,255,0.1)]",
         isDragging && !isDropTarget && "zenith-drag-ghost",
         isInvalid && "animate-pulse"
       )}
@@ -100,24 +122,26 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
         position: 'absolute',
         top: 0,
         left: 0,
-        transform: `translate3d(calc(var(--zenith-drag-x, 0) * 1px), calc(var(--zenith-drag-y, 0) * 1px), 0)`,
+        transform: `translate3d(calc(var(--zenith-drag-x, 0) * 1px), calc(var(--zenith-drag-y, 0) * 1px), 0) rotate(calc(var(--zenith-drag-r, 0) * 1deg))`,
         width: `calc(var(--zenith-drag-w, 0) * 1px)`,
         height: `calc(var(--zenith-drag-h, 0) * 1px)`,
-        zIndex: 2147483647
+        zIndex: 2147483647,
+        pointerEvents: 'none',
       } : {
-        transform: undefined,
         width: undefined,
         height: undefined,
+        left: 0,
+        top: 0,
         borderColor: isDropTarget ? undefined : themeColor
       }}
     >
       {/* Invisible Drag Surface: Ensures we can drag the element even if we miss the border */}
-      {!isHover && !isDndActive && onDragStart && !isEditingText && (
+      {!isHover && onDragStart && !isEditingText && (
         <div 
           className="absolute inset-0 cursor-move z-[10]"
           onPointerDown={(e) => {
             // Only left-click and not on a handle (handles are z-10000)
-            if (e.button === 0) {
+            if (e.button === 0 && !isDndActive) {
               onDragStart(e);
             }
           }}
@@ -170,8 +194,14 @@ export const SelectionOverlay: React.FC<SelectionOverlayProps> = ({
       )}
  
       {!isHover && !isDndActive && (
-          <div className="absolute bottom-[-22px] right-[-0.5px] px-2 py-1 bg-black/80 backdrop-blur-md rounded-sm text-[8px] font-mono font-bold text-cyan-400/80 border border-white/5">
-              {Math.round(rect.width)} × {Math.round(rect.height)}
+          <div className="absolute bottom-[-22px] right-[-0.5px] px-2 py-1 bg-black/80 backdrop-blur-md rounded-sm text-[8px] font-mono font-bold text-cyan-400/80 border border-white/5 flex gap-2">
+              <span>{Math.round(rect.width)} × {Math.round(rect.height)}</span>
+              {rotation !== 0 && (
+                <>
+                  <div className="w-px h-2 bg-white/10" />
+                  <span className="text-pink-400">{rotation}°</span>
+                </>
+              )}
           </div>
       )}
 

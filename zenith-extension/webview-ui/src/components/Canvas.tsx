@@ -33,12 +33,13 @@ const ArtboardHeader: React.FC<{ title: string; w: number; h: number }> = ({ tit
 
 const Artboard: React.FC<{ 
   title: string; 
-  w: number; 
-  h: number; 
+  w: number | string; 
+  h: number | string; 
   devServerUrl: string | null; 
   isSelectMode: boolean;
   previewMode: boolean;
-}> = ({ title, w, h, devServerUrl, isSelectMode, previewMode }) => {
+  isResponsive?: boolean;
+}> = ({ title, w, h, devServerUrl, isSelectMode, previewMode, isResponsive }) => {
   const sandboxPort = useSystemStore(state => state.sandboxPort);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const selectedRect = useSelectionStore(state => state.rect);
@@ -46,7 +47,8 @@ const Artboard: React.FC<{
   const explorerActions = useExplorerStore(state => state.actions);
 
   const zoom = useCanvasStore(state => state.zoom);
-  const { interaction, guides, handleResizeStart, handleDragStart } = useArtboardInteraction(iframeRef, zoom);
+  const effectiveZoom = zoom;
+  const { interaction, guides, handleResizeStart, handleDragStart } = useArtboardInteraction(iframeRef, effectiveZoom);
   const isDragging = useSelectionStore(state => state.isDragging);
   const dropTargetRect = useSelectionStore(state => state.dropTargetRect);
   const insertionRect = useSelectionStore(state => state.insertionRect);
@@ -55,8 +57,8 @@ const Artboard: React.FC<{
   const handleMouseMove = (e: React.PointerEvent) => {
     if (previewMode || !iframeRef.current || e.buttons === 4) return; // 4 is middle button held
     const rect = iframeRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoom;
-    const y = (e.clientY - rect.top) / zoom;
+    const x = (e.clientX - rect.left) / effectiveZoom;
+    const y = (e.clientY - rect.top) / effectiveZoom;
     iframeRef.current.contentWindow?.postMessage({ type: 'zenithHover', x, y }, '*');
   };
 
@@ -65,8 +67,8 @@ const Artboard: React.FC<{
     // Only allow left-click (0) to trigger selection. Ignore middle (1) and right (2).
     if (previewMode || !iframeRef.current || e.button !== 0) return;
     const rect = iframeRef.current.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoom;
-    const y = (e.clientY - rect.top) / zoom;
+    const x = (e.clientX - rect.left) / effectiveZoom;
+    const y = (e.clientY - rect.top) / effectiveZoom;
     iframeRef.current.contentWindow?.postMessage({ type: 'zenithSelect', x, y }, '*');
   };
 
@@ -81,8 +83,8 @@ const Artboard: React.FC<{
     
     // Convert click to local artboard space
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoom;
-    const y = (e.clientY - rect.top) / zoom;
+    const x = (e.clientX - rect.left) / effectiveZoom;
+    const y = (e.clientY - rect.top) / effectiveZoom;
     
     // Check if click is inside the selected element's bounds
     // We add a tiny 4px buffer for easier manipulation
@@ -155,6 +157,13 @@ const Artboard: React.FC<{
       }
       if (data.type === 'zenithSceneBoundsUpdate' && !previewMode) {
           (window as any).__ZENITH_SCENE_BOUNDS__ = data.bounds;
+          const selectedId = useSelectionStore.getState().selectedId;
+          if (selectedId) {
+            const match = data.bounds.find((b: any) => b.id === selectedId);
+            if (match) {
+              useSelectionStore.getState().actions.setRect(match.rect);
+            }
+          }
       }
       if (data.type === 'zenithTextUpdate' && !previewMode) {
           useSelectionStore.getState().actions.updateText(data.zenithId, data.content);
@@ -192,72 +201,96 @@ const Artboard: React.FC<{
     return () => window.removeEventListener('zenith-preview-style', handlePreview as EventListener);
   }, []);
 
-  return (
-    <div className={clsx(
-        "flex flex-col rounded-2xl border border-white/5 bg-[#050505] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.8)] translate-z-0 transition-all duration-500",
-        previewMode ? "rounded-none border-none shadow-none" : ""
-    )}>
-      {!previewMode && <ArtboardHeader title={title} w={w} h={h} />}
-      <div 
-        className="relative overflow-hidden" 
-        style={{ width: w, height: h }}
-        onPointerDown={handleArtboardPointerDown}
-      >
-        <iframe 
-          ref={iframeRef} 
-          src={sandboxUrl} 
-          onLoad={handleLoad} 
-          className={clsx(
-            "w-full h-full border-none transition-all",
-            "pointer-events-auto"
-          )} 
-        />
-        
-         {isSelectMode && !previewMode && (
-           <div className="absolute inset-0 pointer-events-none z-30">
-             {hoverRect && <SpacingRulers rect={hoverRect} color="#00f2ff" />}
-             {selectedRect && <SpacingRulers rect={selectedRect} color="#ff00ff" />}
-             
-             {/* Alignment Guides for Smart Snapping */}
-             <SnapGuides guides={guides} artboardRect={{ width: w, height: h }} />
-             
-             {/* DND Structural Indicators */}
-             {isDragging && dropTargetRect && (
-               <SelectionOverlay 
-                 rect={dropTargetRect} 
-                 isDropTarget 
-                 isInvalid={isDropTargetInvalid} 
-               />
-             )}
-             {isDragging && insertionRect && (
-               <SelectionOverlay 
-                 rect={insertionRect} 
-                 isInsertion 
-               />
-             )}
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
 
-             <SelectionOverlay 
-               rect={hoverRect} 
-               color="#00f2ff" 
-               isHover 
-             />
-             <SelectionOverlay 
-               rect={selectedRect} 
-               color="#ff00ff" 
-               isDragging={isDragging}
-               onResizeStart={handleResizeStart}
-               onDragStart={handleDragStart} 
-             />
-           </div>
-         )}
+    useEffect(() => {
+      if (!isResponsive || !containerRef.current) return;
+      const obs = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry) {
+          setContainerSize({ 
+            width: entry.contentRect.width, 
+            height: entry.contentRect.height 
+          });
+        }
+      });
+      obs.observe(containerRef.current);
+      return () => obs.disconnect();
+    }, [isResponsive]);
+
+    const displayWidth = isResponsive ? containerSize.width : (typeof w === 'number' ? w : parseInt(w as string));
+    const displayHeight = isResponsive ? containerSize.height : (typeof h === 'number' ? h : parseInt(h as string));
+
+    return (
+      <div className={clsx(
+          "flex flex-col rounded-2xl border border-white/5 bg-[#050505] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.8)] translate-z-0 transition-all duration-500",
+          previewMode ? "rounded-none border-none shadow-none" : "",
+          isResponsive ? "w-full h-full rounded-none border-none shadow-none" : ""
+      )}>
+        {!previewMode && !isResponsive && <ArtboardHeader title={title} w={w as number} h={h as number} />}
+        <div 
+          ref={containerRef}
+          className={clsx("relative overflow-hidden", isResponsive ? "w-full h-full" : "")} 
+          style={!isResponsive ? { width: w, height: h } : undefined}
+          onPointerDown={handleArtboardPointerDown}
+        >
+          <iframe 
+            ref={iframeRef} 
+            src={sandboxUrl} 
+            onLoad={handleLoad} 
+            className={clsx(
+              "w-full h-full border-none transition-all",
+              "pointer-events-auto"
+            )} 
+          />
+          
+           {isSelectMode && !previewMode && (
+             <div className="absolute inset-0 pointer-events-none z-30">
+               {hoverRect && <SpacingRulers rect={hoverRect} color="#00f2ff" artboardWidth={displayWidth} artboardHeight={displayHeight} />}
+               {selectedRect && <SpacingRulers rect={selectedRect} color="#ff00ff" artboardWidth={displayWidth} artboardHeight={displayHeight} />}
+               
+               {/* Alignment Guides for Smart Snapping */}
+               <SnapGuides guides={guides} artboardRect={{ width: displayWidth, height: displayHeight }} />
+               
+               {/* DND Structural Indicators */}
+               {isDragging && dropTargetRect && (
+                 <SelectionOverlay 
+                   rect={dropTargetRect} 
+                   isDropTarget 
+                   isInvalid={isDropTargetInvalid} 
+                 />
+               )}
+               {isDragging && insertionRect && (
+                 <SelectionOverlay 
+                   rect={insertionRect} 
+                   isInsertion 
+                 />
+               )}
+  
+               <SelectionOverlay 
+                 rect={hoverRect} 
+                 color="#00f2ff" 
+                 isHover 
+               />
+               <SelectionOverlay 
+                 rect={selectedRect} 
+                 color="#ff00ff" 
+                 isDragging={isDragging}
+                 onResizeStart={handleResizeStart}
+                 onDragStart={handleDragStart} 
+               />
+             </div>
+           )}
+        </div>
       </div>
-    </div>
-  );
+    );
 };
 
 export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string | null; isSpacePressed: boolean }) {
   const deviceWidth = useCanvasStore(state => state.deviceWidth);
   const deviceHeight = useCanvasStore(state => state.deviceHeight);
+  const deviceType = useCanvasStore(state => state.deviceType);
   const activeTool = useCanvasStore(state => state.activeTool);
   const zoom = useCanvasStore(state => state.zoom);
   const pan = useCanvasStore(state => state.pan);
@@ -279,9 +312,9 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
   useEffect(() => {
     const { zoom: z, pan: p } = stateRef.current;
     if (canvasRef.current && z === 1 && p.x === 0 && p.y === 0) {
-        // v11.9 Restoration: Match user preferred "Home" coordinates
-        setPan(-7, -75);
-        setZoom(0.65);
+        // Removed auto-center zoom 0.65 logic to keep canvas 100% like a real browser viewport.
+        // setPan(-7, -75);
+        // setZoom(0.65);
     }
   }, [setPan, setZoom]);
 
@@ -293,7 +326,10 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
   useEffect(() => {
     return () => {
       if (panMoveRef.current) window.removeEventListener('pointermove', panMoveRef.current);
-      if (panUpRef.current) window.removeEventListener('pointerup', panUpRef.current);
+      if (panUpRef.current) {
+        window.removeEventListener('pointerup', panUpRef.current);
+        window.removeEventListener('pointercancel', panUpRef.current);
+      }
     };
   }, []);
 
@@ -320,6 +356,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
       } catch { /* pointer may have already been released */ }
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
       panMoveRef.current = null;
       panUpRef.current = null;
     };
@@ -328,6 +365,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
     panUpRef.current = handlePointerUp;
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
   };
 
   // v8.0 Master Keyboard Shortcuts (Onlook parity)
@@ -339,6 +377,16 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
       if (e.key.toLowerCase() === 'h') setTool('hand');
       if (e.key.toLowerCase() === 't') setTool('text');
       if (e.key.toLowerCase() === 'i') setTool('insert');
+      if (e.key === 'Escape') {
+        console.log('[ZENITH] ESCAPE_RESET | Clearing Interactions');
+        useSelectionStore.setState({ selectedId: null, rect: null, isDragging: false });
+        // Force artboard unlock message to all iframes
+        const canvasIframes = document.querySelectorAll('iframe');
+        canvasIframes.forEach(iframe => {
+          iframe.style.pointerEvents = 'auto';
+          iframe.contentWindow?.postMessage({ type: 'zenithLiveInteractionCleanup' }, '*');
+        });
+      }
       if (cmdKey) {
         if (e.key === '=' || e.key === '+') { e.preventDefault(); setZoom(stateRef.current.zoom * 1.1); }
         if (e.key === '-') { e.preventDefault(); setZoom(stateRef.current.zoom / 1.1); }
@@ -407,7 +455,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
       />
 
       <div 
-        className="absolute top-0 left-0 transform-gpu origin-top-left"
+        className={clsx("absolute top-0 left-0 transform-gpu origin-top-left", deviceType === 'responsive' ? 'w-full h-full' : '')}
         style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})` }}
       >
         {!devServerUrl ? (
@@ -415,8 +463,8 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
             Zenith Engine Standby
           </div>
         ) : (
-          <div className="flex items-center justify-center min-w-full min-h-full">
-             <div className="p-40">
+          <div className={clsx("flex items-center justify-center min-w-full min-h-full", deviceType === 'responsive' ? 'w-full h-full' : '')}>
+             <div className={deviceType === 'responsive' ? 'w-full h-full p-0 m-0' : 'p-40'}>
                <Artboard 
                  title="Active focus" 
                  w={deviceWidth} 
@@ -424,6 +472,7 @@ export function Canvas({ devServerUrl, isSpacePressed }: { devServerUrl: string 
                  devServerUrl={devServerUrl} 
                  isSelectMode={isSelectMode} 
                  previewMode={previewMode}
+                 isResponsive={deviceType === 'responsive'}
                />
              </div>
           </div>

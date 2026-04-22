@@ -106,6 +106,15 @@
     }
   }, true);
 
+  function getRotationFromMatrix(matrix: string): number {
+    if (!matrix || matrix === 'none') return 0;
+    const values = matrix.split('(')[1].split(')')[0].split(',');
+    const a = parseFloat(values[0]);
+    const b = parseFloat(values[1]);
+    // Return high-precision rotation for sub-pixel selection alignment
+    return Math.atan2(b, a) * (180 / Math.PI);
+  }
+
   function getElementDetails(el: HTMLElement) {
     const rect = el.getBoundingClientRect();
     const styles = window.getComputedStyle(el);
@@ -113,6 +122,12 @@
     
     const fingerprint = el.getAttribute('data-zenith-fingerprint') || '';
     const componentName = fingerprint.split('|')[1] || el.tagName.toLowerCase();
+
+    // Capture unrotated dimensions for layout-stable interaction
+    // We use getComputedStyle to get the layout size before transforms
+    const layoutWidth = parseFloat(styles.width) || el.offsetWidth;
+    const layoutHeight = parseFloat(styles.height) || el.offsetHeight;
+    const rotation = getRotationFromMatrix(styles.transform) || parseFloat(styles.rotate) || 0;
 
     return {
       zenithId: id,
@@ -122,7 +137,10 @@
         x: rect.left,
         y: rect.top,
         width: rect.width,
-        height: rect.height
+        height: rect.height,
+        layoutWidth,
+        layoutHeight,
+        rotation
       },
       computedStyles: {
         backgroundColor: styles.backgroundColor,
@@ -145,9 +163,30 @@
         right: styles.right,
         bottom: styles.bottom,
         flex: styles.flex,
-        gridArea: styles.gridArea
+        gridArea: styles.gridArea,
+        transform: styles.transform,
+        transformOrigin: styles.transformOrigin
       }
     };
+  }
+
+  function broadcastBounds() {
+    const elements = document.querySelectorAll('[data-zenith-id]');
+    const bounds = Array.from(elements).map(el => {
+      const rect = (el as HTMLElement).getBoundingClientRect();
+      const styles = window.getComputedStyle(el);
+      return {
+        id: el.getAttribute('data-zenith-id'),
+        rect: {
+            x: rect.left,
+            y: rect.top,
+            width: rect.width,
+            height: rect.height,
+            rotation: getRotationFromMatrix(styles.transform) || parseFloat(styles.rotate) || 0
+        }
+      };
+    });
+    window.parent.postMessage({ type: 'zenithSceneBoundsUpdate', bounds }, '*');
   }
 
   // --- 3. Message Listener ---
@@ -162,20 +201,7 @@
         break;
 
       case 'zenithRequestSceneBounds': {
-        const elements = document.querySelectorAll('[data-zenith-id]');
-        const bounds = Array.from(elements).map(el => {
-          const rect = (el as HTMLElement).getBoundingClientRect();
-          return {
-            id: el.getAttribute('data-zenith-id'),
-            rect: {
-                x: rect.left,
-                y: rect.top,
-                width: rect.width,
-                height: rect.height
-            }
-          };
-        });
-        window.parent.postMessage({ type: 'zenithSceneBoundsUpdate', bounds }, '*');
+        broadcastBounds();
         break;
       }
 
@@ -198,13 +224,15 @@
         const el = Array.from(document.querySelectorAll('[data-zenith-id]')).find(e => e.getAttribute('data-zenith-id') === m.id) as HTMLElement;
         if (el) {
           const rect = el.getBoundingClientRect();
+          const styles = window.getComputedStyle(el);
           window.parent.postMessage({
             type: 'zenithHover',
             rect: {
               x: rect.left,
               y: rect.top,
               width: rect.width,
-              height: rect.height
+              height: rect.height,
+              rotation: getRotationFromMatrix(styles.transform) || parseFloat(styles.rotate) || 0
             },
             tagName: el.tagName.toLowerCase()
           }, '*');
@@ -218,13 +246,15 @@
         const el = getElementAt(m.x, m.y);
         if (el) {
           const rect = el.getBoundingClientRect();
+          const styles = window.getComputedStyle(el);
           window.parent.postMessage({
             type: 'zenithHover',
             rect: {
               x: rect.left,
               y: rect.top,
               width: rect.width,
-              height: rect.height
+              height: rect.height,
+              rotation: getRotationFromMatrix(styles.transform) || parseFloat(styles.rotate) || 0
             },
             tagName: el.tagName.toLowerCase()
           }, '*');
@@ -234,31 +264,127 @@
         break;
       }
       
-      case 'zenithGhostSync': {
+      case 'zenithLiveResize': {
         const el = Array.from(document.querySelectorAll('[data-zenith-id]')).find(e => e.getAttribute('data-zenith-id') === m.id) as HTMLElement;
         if (el) {
-          let ghost = document.getElementById(`zenith-ghost-${m.id}`);
-          if (!ghost) {
-             ghost = el.cloneNode(true) as HTMLElement;
-             ghost.id = `zenith-ghost-${m.id}`;
-             ghost.removeAttribute('data-zenith-id');
-             ghost.querySelectorAll('[data-zenith-id]').forEach(desc => desc.removeAttribute('data-zenith-id'));
-             
-             ghost.style.pointerEvents = 'none';
-             ghost.style.opacity = '0.8';
-             ghost.style.position = 'fixed';
-             ghost.style.zIndex = '2147483647';
-             ghost.style.margin = '0';
-             ghost.style.transition = 'none';
-             ghost.style.boxSizing = 'border-box';
-             document.body.appendChild(ghost);
+          if (typeof (el as any).__zenith_orig_transition !== 'string') {
+            (el as any).__zenith_orig_transition = el.style.transition || '';
+            (el as any).__zenith_orig_willChange = el.style.willChange || '';
+            (el as any).__zenith_orig_width = el.style.width || '';
+            (el as any).__zenith_orig_height = el.style.height || '';
+            (el as any).__zenith_orig_left = el.style.left || '';
+            (el as any).__zenith_orig_top = el.style.top || '';
+            (el as any).__zenith_orig_position = el.style.position || '';
+          }
+
+          el.style.setProperty('transition', 'none');
+          el.style.setProperty('will-change', 'width, height, left, top');
+          
+          Object.entries(m.styles).forEach(([prop, val]) => {
+             el.style.setProperty(prop, val as string);
+          });
+        }
+        break;
+      }
+      
+      case 'zenithLiveDragTransform': {
+        const el = Array.from(document.querySelectorAll('[data-zenith-id]')).find(e => e.getAttribute('data-zenith-id') === m.id) as HTMLElement;
+        if (el) {
+          if (typeof (el as any).__zenith_orig_transform !== 'string') {
+            const computedStyle = window.getComputedStyle(el);
+            (el as any).__zenith_orig_transform = el.style.transform || computedStyle.transform || '';
+            (el as any).__zenith_orig_rotate = el.style.rotate || computedStyle.rotate || '';
+            (el as any).__zenith_orig_scale = el.style.scale || computedStyle.scale || '';
+            (el as any).__zenith_orig_translate = el.style.translate || computedStyle.translate || '';
+            
+            (el as any).__zenith_orig_transition = el.style.transition || '';
+            (el as any).__zenith_orig_zIndex = el.style.zIndex || '';
+            (el as any).__zenith_orig_willChange = el.style.willChange || '';
+            (el as any).__zenith_orig_pointerEvents = el.style.pointerEvents || '';
+            
+            // Apply isolation CSS (without taking it out of flow)
+            el.style.setProperty('will-change', 'transform');
+            el.style.setProperty('pointer-events', 'none');
+            el.style.setProperty('z-index', '2147483647');
+            el.style.setProperty('transition', 'none');
           }
           
-          ghost.style.width = `${m.width}px`;
-          ghost.style.height = `${m.height}px`;
-          ghost.style.left = '0px';
-          ghost.style.top = '0px';
-          ghost.style.transform = `translate3d(${m.x}px, ${m.y}px, 0)`;
+          const origTransform = (el as any).__zenith_orig_transform;
+          const baseTransform = (origTransform === 'none' || !origTransform) ? '' : origTransform;
+          
+          // Apply movement as a translation relative to the original state
+          el.style.transform = `translate3d(${m.dx}px, ${m.dy}px, 0) ${baseTransform}`;
+          
+          // Preserve other modern transform properties if they exist
+          if ((el as any).__zenith_orig_rotate && (el as any).__zenith_orig_rotate !== 'none') {
+            el.style.rotate = (el as any).__zenith_orig_rotate;
+          }
+          if ((el as any).__zenith_orig_scale && (el as any).__zenith_orig_scale !== 'none') {
+            el.style.scale = (el as any).__zenith_orig_scale;
+          }
+        }
+        break;
+      }
+      
+      case 'zenithLiveInteractionCleanup': {
+        const el = Array.from(document.querySelectorAll('[data-zenith-id]')).find(e => e.getAttribute('data-zenith-id') === m.id) as HTMLElement;
+        if (el) {
+          if (typeof (el as any).__zenith_orig_transform === 'string') {
+            el.style.transform = (el as any).__zenith_orig_transform;
+            delete (el as any).__zenith_orig_transform;
+          }
+          if (typeof (el as any).__zenith_orig_rotate === 'string') {
+            el.style.rotate = (el as any).__zenith_orig_rotate;
+            delete (el as any).__zenith_orig_rotate;
+          }
+          if (typeof (el as any).__zenith_orig_scale === 'string') {
+            el.style.scale = (el as any).__zenith_orig_scale;
+            delete (el as any).__zenith_orig_scale;
+          }
+          if (typeof (el as any).__zenith_orig_translate === 'string') {
+            el.style.translate = (el as any).__zenith_orig_translate;
+            delete (el as any).__zenith_orig_translate;
+          }
+          if (typeof (el as any).__zenith_orig_transition === 'string') {
+            el.style.transition = (el as any).__zenith_orig_transition;
+            delete (el as any).__zenith_orig_transition;
+          }
+          if (typeof (el as any).__zenith_orig_zIndex === 'string') {
+            el.style.zIndex = (el as any).__zenith_orig_zIndex;
+            delete (el as any).__zenith_orig_zIndex;
+          }
+          if (typeof (el as any).__zenith_orig_position === 'string') {
+            el.style.position = (el as any).__zenith_orig_position;
+            delete (el as any).__zenith_orig_position;
+          }
+          if (typeof (el as any).__zenith_orig_willChange === 'string') {
+            el.style.willChange = (el as any).__zenith_orig_willChange;
+            delete (el as any).__zenith_orig_willChange;
+          }
+          if (typeof (el as any).__zenith_orig_pointerEvents === 'string') {
+            el.style.pointerEvents = (el as any).__zenith_orig_pointerEvents;
+            delete (el as any).__zenith_orig_pointerEvents;
+          }
+          if (typeof (el as any).__zenith_orig_width === 'string') {
+            el.style.width = (el as any).__zenith_orig_width;
+            delete (el as any).__zenith_orig_width;
+          }
+          if (typeof (el as any).__zenith_orig_height === 'string') {
+            el.style.height = (el as any).__zenith_orig_height;
+            delete (el as any).__zenith_orig_height;
+          }
+          if (typeof (el as any).__zenith_orig_left === 'string') {
+            el.style.left = (el as any).__zenith_orig_left;
+            delete (el as any).__zenith_orig_left;
+          }
+          if (typeof (el as any).__zenith_orig_top === 'string') {
+            el.style.top = (el as any).__zenith_orig_top;
+            delete (el as any).__zenith_orig_top;
+          }
+          
+          delete (el as any).__zenith_orig_rect;
+          delete (el as any).__zenith_compensateX;
+          delete (el as any).__zenith_compensateY;
         }
         break;
       }
@@ -299,7 +425,6 @@
                 if (m.property === 'position' || m.property === 'opacity') {
                     el.style.zIndex = '';
                     el.style.pointerEvents = '';
-                    el.style.transform = '';
                 }
             }
         }
@@ -322,7 +447,6 @@
             el.style.position = (m.styles as any).position || el.style.position;
             el.style.zIndex = '';
             el.style.pointerEvents = '';
-            el.style.transform = '';
         }
         break;
       }
@@ -392,9 +516,46 @@
   setTimeout(broadcastTree, 500);
   
   const observer = new MutationObserver(() => {
-    broadcastTree();
+    scheduleTreeUpdate();
+    scheduleBoundsUpdate();
   });
   observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-zenith-id'] });
+
+  // --- 4. Event Listeners for Parity ---
+  let boundsTask: number | null = null;
+  const scheduleBoundsUpdate = () => {
+    if (boundsTask) return;
+    boundsTask = requestAnimationFrame(() => {
+      broadcastBounds();
+      boundsTask = null;
+    });
+  };
+
+  let treeTask: number | null = null;
+  const scheduleTreeUpdate = () => {
+    if (treeTask) return;
+    treeTask = requestAnimationFrame(() => {
+      broadcastTree();
+      treeTask = null;
+    });
+  };
+
+  window.addEventListener('scroll', scheduleBoundsUpdate, { capture: true, passive: true });
+  window.addEventListener('resize', scheduleBoundsUpdate, { passive: true });
+
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      scheduleBoundsUpdate();
+      // Also broadcast tree if layout changes significantly
+      scheduleTreeUpdate();
+    });
+    ro.observe(document.body);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    broadcastTree();
+    broadcastBounds();
+  });
 
   const hot = (import.meta as any).hot;
   if (hot) {

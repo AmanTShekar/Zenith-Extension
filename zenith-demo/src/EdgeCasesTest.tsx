@@ -1,7 +1,17 @@
 export function EdgeCasesTest() {
   return (
     <div style={{ padding: "50px", background: "#1e1e1e", color: "white", minHeight: "100vh" }}>
-      <h2>Edge Cases Testing</h2>
+      <h2
+        style={{
+          height: "32px",
+          left: "110px",
+          position: "relative",
+          top: "6px",
+          width: "222px",
+        }}
+      >
+        Edge Cases 1
+      </h2>
       {/* 1. Transformed Parent */}
       <div
         className="transformed-parent"
@@ -11,11 +21,11 @@ export function EdgeCasesTest() {
           padding: "20px",
           margin: "20px",
           background: "#333",
-          height: "79px",
-          left: "26px",
+          height: "82px",
+          width: "335px",
+          left: "-13px",
           position: "relative",
-          top: "-26px",
-          width: "315px",
+          top: "395px",
         }}
       >
         <h3>Transformed Parent (Scale 0.8, Rotate 5deg)</h3>
@@ -35,9 +45,9 @@ export function EdgeCasesTest() {
           border: "2px solid green",
           margin: "20px",
           background: "#333",
-          left: "5px",
+          left: "2px",
           position: "relative",
-          top: "192px",
+          top: "-37px",
         }}
       >
         <h3>Relative Container</h3>
@@ -71,10 +81,10 @@ export function EdgeCasesTest() {
           background: "#333",
           padding: "20px",
           height: "135px",
-          left: "1117px",
-          position: "fixed",
-          top: "351px",
           width: "200px",
+          left: "1090px",
+          position: "fixed",
+          top: "490px",
         }}
       >
         <h3>Fixed Position</h3>

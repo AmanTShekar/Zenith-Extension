@@ -5,6 +5,8 @@ import { useCanvasStore } from '../stores';
 interface SpacingRulersProps {
   rect: { x: number; y: number; width: number; height: number };
   color?: string;
+  artboardWidth: number;
+  artboardHeight: number;
 }
 
 const LineSegment = ({ distance, axis, pos, rect, color, styleBase }: { 
@@ -39,13 +41,11 @@ const LineSegment = ({ distance, axis, pos, rect, color, styleBase }: {
   );
 };
 
-export const SpacingRulers: React.FC<SpacingRulersProps> = ({ rect, color = '#00F0FF' }) => {
+export const SpacingRulers: React.FC<SpacingRulersProps> = ({ rect, color = '#00F0FF', artboardWidth, artboardHeight }) => {
   const zoom = useCanvasStore(state => state.zoom);
   const pan = useCanvasStore(state => state.pan);
 
   // v11.3: Ghost Rulers — Precise distances to all artboard boundaries
-  const artboardWidth = 1440; 
-  const artboardHeight = 900;
 
   const distances = {
     top: rect.y,

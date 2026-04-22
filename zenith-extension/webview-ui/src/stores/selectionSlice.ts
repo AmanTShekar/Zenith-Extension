@@ -6,7 +6,15 @@ export interface SelectionSlice {
   selectedId: string | null;
   elementInfo: { id: string; tagName: string } | null;
   fiberInfo: FiberInfo | null;
-  rect: { x: number; y: number; width: number; height: number } | null;
+  rect: { 
+    x: number; 
+    y: number; 
+    width: number; 
+    height: number;
+    layoutWidth?: number;
+    layoutHeight?: number;
+    rotation?: number;
+  } | null;
   computedStyles: Record<string, string>;
   activeState: InteractionState;
   currentStack: HierarchyItem[];
@@ -15,12 +23,28 @@ export interface SelectionSlice {
     setSelected: (
       selectedId: string | null, 
       elementInfo: { id: string; tagName: string }, 
-      rect: { x: number; y: number; width: number; height: number } | null, 
+      rect: { 
+        x: number; 
+        y: number; 
+        width: number; 
+        height: number;
+        layoutWidth?: number;
+        layoutHeight?: number;
+        rotation?: number;
+      } | null, 
       styles: Record<string, string>, 
       stack: HierarchyItem[],
       fiberInfo?: FiberInfo | null
     ) => void;
-    setRect: (rect: { x: number; y: number; width: number; height: number } | null) => void;
+    setRect: (rect: { 
+      x: number; 
+      y: number; 
+      width: number; 
+      height: number;
+      layoutWidth?: number;
+      layoutHeight?: number;
+      rotation?: number;
+    } | null) => void;
     setActiveState: (state: InteractionState) => void;
     setEditingText: (editing: boolean) => void;
   };

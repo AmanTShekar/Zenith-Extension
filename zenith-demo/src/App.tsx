@@ -14,9 +14,9 @@ function App() {
         <section
           className="surgical-card"
           style={{
-            left: "684px",
+            left: "616px",
             position: "relative",
-            top: "161px",
+            top: "99px",
           }}
         >
           <h2
@@ -70,9 +70,9 @@ function App() {
           style={{
             fontWeight: 600,
             padding: "24px",
-            left: "-693px",
+            left: "-650px",
             position: "relative",
-            top: "-47px",
+            top: "54px",
           }}
         >
           <h2
